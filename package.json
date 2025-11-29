@@ -1,5 +1,5 @@
 {
-  "name": "pcloud-cli",
+  "name": "@kud/pcloud-cli",
   "version": "1.0.0",
   "description": "",
   "main": "dist/cli.js",
