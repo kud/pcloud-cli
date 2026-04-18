@@ -3,9 +3,9 @@ import { URL } from "url"
 import open from "open"
 
 export interface OAuthTokens {
-  accessToken: string
+  access_token: string
   locationId?: number
-  apiServer?: string
+  hostname?: string
   userId?: number
 }
 
@@ -123,11 +123,11 @@ export class OAuthFlow {
     }
 
     return {
-      accessToken: String(data.access_token),
+      access_token: String(data.access_token),
       userId: typeof data.uid === "number" ? data.uid : undefined,
       locationId:
         typeof data.locationid === "number" ? data.locationid : undefined,
-      apiServer: data.hostname ? `https://${data.hostname}` : undefined,
+      hostname: data.hostname ? String(data.hostname) : undefined,
     }
   }
 

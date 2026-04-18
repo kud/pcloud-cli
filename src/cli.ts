@@ -28,8 +28,9 @@ async function getAuthenticatedAPI(): Promise<PCloudAPI> {
   // Option 2: Check for stored token
   const tokens = tokenStore.load()
   if (tokens) {
-    const api = new PCloudAPI(tokens.apiServer)
-    api.setAccessToken(tokens.accessToken, tokens.apiServer)
+    const apiServer = tokens.hostname ? `https://${tokens.hostname}` : undefined
+    const api = new PCloudAPI(apiServer)
+    api.setAccessToken(tokens.access_token, apiServer)
     return api
   }
 
@@ -70,8 +71,8 @@ program
 
       // Save the token
       tokenStore.save({
-        accessToken: tokens.accessToken,
-        apiServer: tokens.apiServer,
+        access_token: tokens.access_token,
+        hostname: tokens.hostname,
       })
 
       console.log("\n🎉 Setup complete!")

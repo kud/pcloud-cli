@@ -1,7 +1,8 @@
 {
   "name": "@kud/pcloud-cli",
   "version": "0.1.0",
-  "description": "",
+  "description": "CLI tool for pCloud file operations — list, restore from trash and rewind",
+  "homepage": "https://kud.github.io/pcloud-cli",
   "main": "dist/cli.js",
   "bin": {
     "pcloud": "./dist/cli.js"
@@ -15,6 +16,10 @@
   "keywords": [],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kud/pcloud-cli.git"
+  },
   "type": "commonjs",
   "devDependencies": {
     "@types/express": "5.0.5",
