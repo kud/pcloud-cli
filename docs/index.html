@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>pcloud-cli — Manage pCloud files from your terminal</title>
+    <meta
+      name="description"
+      content="CLI tool for pCloud file operations — list, restore from trash and rewind."
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <nav id="nav">
+      <div class="nav-inner">
+        <a class="nav-logo" href="#">pcloud<span>-cli</span></a>
+        <ul class="nav-links">
+          <li><a href="#features">Features</a></li>
+          <li><a href="#quickstart">Quick Start</a></li>
+          <li><a href="#cli">CLI</a></li>
+          <li><a href="#config">Config</a></li>
+        </ul>
+        <a
+          class="nav-cta"
+          href="https://github.com/kud/pcloud-cli"
+          target="_blank"
+          rel="noopener"
+          >GitHub ↗</a
+        >
+      </div>
+    </nav>
+
+    <main>
+      <section class="hero">
+        <div class="hero-bg"></div>
+        <div class="hero-grid"></div>
+        <div class="hero-content">
+          <div class="hero-badge">
+            <span class="hero-badge-dot"></span> v0.1.0 · MIT
+          </div>
+          <h1>pcloud-cli</h1>
+          <p>
+            A TypeScript CLI for managing pCloud storage — list trash, restore
+            deleted files, and roll back with rewind. All from your terminal.
+          </p>
+          <div class="hero-ctas">
+            <a
+              class="btn btn-primary"
+              href="https://www.npmjs.com/package/@kud/pcloud-cli"
+              target="_blank"
+              rel="noopener"
+              >View on npm</a
+            >
+            <a
+              class="btn btn-ghost"
+              href="https://github.com/kud/pcloud-cli"
+              target="_blank"
+              rel="noopener"
+              >GitHub ↗</a
+            >
+          </div>
+          <div class="hero-command code-block">
+            <code>npm install -g @kud/pcloud-cli</code>
+            <button class="copy-btn" data-copy="npm install -g @kud/pcloud-cli">
+              Copy
+            </button>
+          </div>
+          <div class="stats">
+            <div class="stat">
+              <span class="stat-value">v0.1.0</span>
+              <div class="stat-label">Latest</div>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat">
+              <span class="stat-value">6</span>
+              <div class="stat-label">Commands</div>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat">
+              <span class="stat-value">MIT</span>
+              <div class="stat-label">Licence</div>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat">
+              <span class="stat-value">TS</span>
+              <div class="stat-label">TypeScript</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features">
+        <div class="section-inner">
+          <span class="section-eyebrow reveal">Why pcloud-cli</span>
+          <h2 class="reveal">Features</h2>
+          <p class="section-sub reveal">
+            Everything you need to manage your pCloud storage from the terminal
+            — no browser required after the one-time OAuth login.
+          </p>
+          <div class="features-grid">
+            <div class="feature-card">
+              <div class="feature-icon">🔐</div>
+              <div class="feature-title">OAuth2 Login</div>
+              <div class="feature-desc">
+                One-time browser-based authentication via pCloud's OAuth2
+                authorization code flow. Your password never touches the CLI.
+              </div>
+            </div>
+            <div class="feature-card">
+              <div class="feature-icon">🗑️</div>
+              <div class="feature-title">Trash Listing</div>
+              <div class="feature-desc">
+                View all files in your pCloud trash with full metadata — name,
+                path, deletion date, and file size.
+              </div>
+            </div>
+            <div class="feature-card">
+              <div class="feature-icon">♻️</div>
+              <div class="feature-title">Restore from Trash</div>
+              <div class="feature-desc">
+                Recover any deleted file instantly by its ID. No hunting through
+                the web UI required.
+              </div>
+            </div>
+            <div class="feature-card">
+              <div class="feature-icon">⏪</div>
+              <div class="feature-title">Rewind History</div>
+              <div class="feature-desc">
+                Browse the full version history of any file path using pCloud's
+                built-in rewind feature.
+              </div>
+            </div>
+            <div class="feature-card">
+              <div class="feature-icon">🔄</div>
+              <div class="feature-title">Restore from Rewind</div>
+              <div class="feature-desc">
+                Roll back any file to a previous version and save it to a
+                destination path of your choosing.
+              </div>
+            </div>
+            <div class="feature-card">
+              <div class="feature-icon">💾</div>
+              <div class="feature-title">Token Storage</div>
+              <div class="feature-desc">
+                Access tokens are persisted locally so you stay authenticated
+                across sessions without re-logging in.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="quickstart">
+        <div class="section-inner">
+          <span class="section-eyebrow reveal">Get going fast</span>
+          <h2 class="reveal">Quick Start</h2>
+          <p class="section-sub reveal">
+            Install, authenticate once, and start managing your files in under a
+            minute.
+          </p>
+          <div class="code-block reveal">
+            <pre><code><span class="comment"># Install globally</span>
+<span class="cmd">npm install -g @kud/pcloud-cli</span>
+
+<span class="comment"># Add your OAuth credentials to .env</span>
+<span class="cmd">echo "PCLOUD_CLIENT_ID=your_client_id" &gt;&gt; .env</span>
+<span class="cmd">echo "PCLOUD_CLIENT_SECRET=your_client_secret" &gt;&gt; .env</span>
+
+<span class="comment"># Authenticate once — opens browser for OAuth</span>
+<span class="cmd">pcloud login</span>
+<span class="output">🔐 Opening browser for authentication...
+✓ Authentication successful!
+🎉 Setup complete! Your access has been saved securely.</span>
+
+<span class="comment"># List files in trash</span>
+<span class="cmd">pcloud list-trash</span>
+<span class="output">
+Files in trash:
+================
+
+File ID: 12345
+Name: report.pdf
+Path: /Documents/report.pdf
+Deleted: 4/17/2026, 10:32:00 AM
+Size: 1.24 MB</span>
+
+<span class="comment"># Restore a file</span>
+<span class="cmd">pcloud restore-trash 12345</span>
+<span class="output">✓ Successfully restored file 12345</span></code></pre>
+            <button class="copy-btn" data-copy="npm install -g @kud/pcloud-cli">
+              Copy install
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section id="cli">
+        <div class="section-inner">
+          <span class="section-eyebrow reveal">Commands</span>
+          <h2 class="reveal">CLI Reference</h2>
+          <p class="section-sub reveal">
+            All commands available via the <code>pcloud</code> binary.
+          </p>
+          <div class="cli-list reveal">
+            <div class="cli-row">
+              <span class="cli-cmd">pcloud login</span>
+              <span class="cli-desc"
+                >Authenticate with pCloud via OAuth2. Opens your browser once —
+                saves the token locally for all future commands.</span
+              >
+            </div>
+            <div class="cli-row">
+              <span class="cli-cmd">pcloud logout</span>
+              <span class="cli-desc"
+                >Remove the stored access token from your machine.</span
+              >
+            </div>
+            <div class="cli-row">
+              <span class="cli-cmd">pcloud list-trash</span>
+              <span class="cli-desc"
+                >List all files in your pCloud trash with name, path, deletion
+                date, and size.</span
+              >
+            </div>
+            <div class="cli-row">
+              <span class="cli-cmd">pcloud restore-trash &lt;fileid&gt;</span>
+              <span class="cli-desc"
+                >Restore a deleted file from trash by its numeric file ID.</span
+              >
+            </div>
+            <div class="cli-row">
+              <span class="cli-cmd">pcloud list-rewind &lt;path&gt;</span>
+              <span class="cli-desc"
+                >List all rewind events (version history) for a file path, e.g.
+                <code>/mydocument.txt</code>.</span
+              >
+            </div>
+            <div class="cli-row">
+              <span class="cli-cmd"
+                >pcloud restore-rewind &lt;fileid&gt; &lt;topath&gt;</span
+              >
+              <span class="cli-desc"
+                >Restore a previous version of a file by its ID to a destination
+                path.</span
+              >
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="config">
+        <div class="section-inner">
+          <span class="section-eyebrow reveal">Configuration</span>
+          <h2 class="reveal">Configuration</h2>
+          <p class="section-sub reveal">
+            Set environment variables in a <code>.env</code> file at the project
+            root, or export them directly in your shell.
+          </p>
+          <div class="config-wrap reveal">
+            <table>
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Required</th>
+                  <th>Default</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code class="config-key">PCLOUD_CLIENT_ID</code></td>
+                  <td>Yes</td>
+                  <td><code class="config-default">—</code></td>
+                  <td>
+                    Your pCloud OAuth app client ID from the pCloud developer
+                    console.
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <code class="config-key">PCLOUD_CLIENT_SECRET</code>
+                  </td>
+                  <td>Yes</td>
+                  <td><code class="config-default">—</code></td>
+                  <td>
+                    Your pCloud OAuth app client secret, used to exchange the
+                    authorization code for an access token.
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <code class="config-key">PCLOUD_ACCESS_TOKEN</code>
+                  </td>
+                  <td>No</td>
+                  <td><code class="config-default">—</code></td>
+                  <td>
+                    Optional direct access token. If set, bypasses the stored
+                    token and OAuth flow entirely.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="footer-inner">
+        <span class="footer-name">@kud/pcloud-cli</span>
+        <nav class="footer-links">
+          <a href="https://github.com/kud/pcloud-cli">GitHub</a>
+          <a href="https://www.npmjs.com/package/@kud/pcloud-cli">npm</a>
+          <a href="https://github.com/kud/pcloud-cli/blob/main/CHANGELOG.md"
+            >Changelog</a
+          >
+        </nav>
+        <span class="footer-copy">MIT Licence</span>
+      </div>
+    </footer>
+
+    <script>
+      const nav = document.getElementById("nav")
+      const onScroll = () =>
+        nav.classList.toggle("scrolled", window.scrollY > 20)
+      window.addEventListener("scroll", onScroll, { passive: true })
+      onScroll()
+
+      document.querySelectorAll(".copy-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const text =
+            btn.dataset.copy ||
+            btn.closest(".hero-command")?.querySelector("code")?.textContent ||
+            ""
+          navigator.clipboard.writeText(text).then(() => {
+            btn.textContent = "Copied!"
+            btn.classList.add("copied")
+            setTimeout(() => {
+              btn.textContent = "Copy"
+              btn.classList.remove("copied")
+            }, 1800)
+          })
+        })
+      })
+
+      const observer = new IntersectionObserver(
+        (entries) =>
+          entries.forEach((e) => {
+            if (e.isIntersecting) e.target.classList.add("visible")
+          }),
+        { threshold: 0.07, rootMargin: "0px 0px -40px 0px" },
+      )
+      document.querySelectorAll(".reveal").forEach((el) => observer.observe(el))
+    </script>
+  </body>
+</html>
