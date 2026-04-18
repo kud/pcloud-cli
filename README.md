@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="./assets/logo.svg" width="80" alt="pCloud logo" />
+</div>
+
 # pcloud-cli
 
 [![npm version](https://img.shields.io/npm/v/@kud/pcloud-cli?style=flat-square)](https://www.npmjs.com/package/@kud/pcloud-cli)
