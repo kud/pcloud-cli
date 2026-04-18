@@ -277,12 +277,12 @@ a:hover {
 }
 .btn-primary {
   background: var(--primary);
-  color: #000;
+  color: #0a0a0a;
   border: 1px solid var(--primary);
 }
 .btn-primary:hover {
   filter: brightness(1.15);
-  color: #000;
+  color: #0a0a0a;
 }
 .btn-ghost {
   background: transparent;
@@ -574,6 +574,9 @@ footer {
 }
 
 @media (max-width: 640px) {
+  .nav-links {
+    display: none;
+  }
   .hero h1 {
     font-size: 2.4rem;
   }
