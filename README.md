@@ -1,6 +1,8 @@
 <div align="center">
-  <img src="./assets/logo.svg" width="80" alt="pCloud logo" />
+  <img src="./assets/logo.png" width="80" alt="pCloud CLI logo" />
 </div>
+
+<div align="center">
 
 # pcloud-cli
 
@@ -11,6 +13,8 @@
 
 CLI tool for pCloud file operations — list, restore from trash and rewind.
 
+</div>
+
 ## Features
 
 - List all files currently in pCloud trash
@@ -18,7 +22,7 @@ CLI tool for pCloud file operations — list, restore from trash and rewind.
 - Browse version history for any file path
 - Restore a specific version to a new destination
 - OAuth 2.0 authentication — browser-based, token stored locally
-- Bypass stored credentials with an environment variable
+- Bypass stored credentials with an environment variable for CI use
 
 ## Installation
 

@@ -14,10 +14,17 @@ export class OAuthFlow {
   private redirectUri: string
   private clientId: string
   private clientSecret: string
+  private authBaseUrl: string
 
-  constructor(clientId: string, clientSecret: string, port: number = 3000) {
+  constructor(
+    clientId: string,
+    clientSecret: string,
+    authBaseUrl: string = "https://my.pcloud.com",
+    port: number = 3000,
+  ) {
     this.clientId = clientId
     this.clientSecret = clientSecret
+    this.authBaseUrl = authBaseUrl
     this.port = port
     this.redirectUri = `http://localhost:${port}/oauth/callback`
   }
@@ -36,6 +43,7 @@ export class OAuthFlow {
         }
 
         const code = url.searchParams.get("code")
+        const hostname = url.searchParams.get("hostname") ?? undefined
         const error = url.searchParams.get("error")
 
         if (error) {
@@ -57,7 +65,7 @@ export class OAuthFlow {
         }
 
         try {
-          const tokens = await this.exchangeCode(code)
+          const tokens = await this.exchangeCode(code, hostname)
 
           res.writeHead(200, { "Content-Type": "text/html" })
           res.end(`
@@ -106,15 +114,19 @@ export class OAuthFlow {
     })
   }
 
-  private async exchangeCode(code: string): Promise<OAuthTokens> {
+  private async exchangeCode(
+    code: string,
+    hostname?: string,
+  ): Promise<OAuthTokens> {
     const params = new URLSearchParams({
       client_id: this.clientId,
       client_secret: this.clientSecret,
       code,
     })
 
+    const apiHost = hostname ?? "api.pcloud.com"
     const response = await fetch(
-      `https://api.pcloud.com/oauth2_token?${params.toString()}`,
+      `https://${apiHost}/oauth2_token?${params.toString()}`,
     )
     const data = (await response.json()) as Record<string, unknown>
 
@@ -127,7 +139,7 @@ export class OAuthFlow {
       userId: typeof data.uid === "number" ? data.uid : undefined,
       locationId:
         typeof data.locationid === "number" ? data.locationid : undefined,
-      hostname: data.hostname ? String(data.hostname) : undefined,
+      hostname: data.hostname ? String(data.hostname) : hostname,
     }
   }
 
@@ -138,6 +150,6 @@ export class OAuthFlow {
       redirect_uri: this.redirectUri,
     })
 
-    return `https://my.pcloud.com/oauth2/authorize?${params.toString()}`
+    return `${this.authBaseUrl}/oauth2/authorize?${params.toString()}`
   }
 }
