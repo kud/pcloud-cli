@@ -5,9 +5,13 @@ import Image, { TerminalInfoProvider } from "ink-picture"
 import open from "open"
 import { execFileSync } from "child_process"
 import fs from "fs"
-import { PCloudAPI } from "./api.js"
-import { TokenStore } from "./token-store.js"
-import { PCloudFolderItem, PCloudTrashItem, PCloudRewindItem } from "./types.js"
+import {
+  PCloudAPI,
+  PCloudFolderItem,
+  PCloudTrashItem,
+  PCloudRewindItem,
+} from "@kud/pcloud-sdk"
+import { TokenStore } from "@kud/pcloud-auth"
 
 type Phase =
   | "loading"
@@ -527,6 +531,15 @@ const Browse = () => {
     api
       .listTrash()
       .then((response) => {
+        if (response.result === 1000) {
+          setItems([])
+          setCursor(0)
+          showResult(
+            "⚠ Trash requires a session token — not supported with OAuth access tokens.",
+            true,
+          )
+          return
+        }
         const raw: PCloudTrashItem[] = (response.contents ??
           []) as PCloudTrashItem[]
         setTrashItems(raw)
@@ -746,6 +759,10 @@ const Browse = () => {
         if (!trashItem) return
         runAction(async () => {
           const res = await api.restoreFromTrash(trashItem.fileid)
+          if (res.result === 1000)
+            throw new Error(
+              "⚠ Trash requires a session token — not supported with OAuth access tokens.",
+            )
           if (res.result !== 0) throw new Error(res.error ?? "Restore failed")
           showResult(`\u2713 Restored "${trashItem.name}"`)
           loadTrash()

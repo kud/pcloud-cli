@@ -1,16 +1,14 @@
 #!/usr/bin/env node
 import { Command } from "commander"
 import dotenv from "dotenv"
-import { PCloudAPI } from "./api.js"
 import {
+  PCloudAPI,
   PCloudFolderItem,
   PCloudPublink,
   PCloudRevision,
   PCloudShareItem,
-  PCloudTrashItem,
-} from "./types.js"
-import { TokenStore } from "./token-store.js"
-import { OAuthFlow } from "./oauth.js"
+} from "@kud/pcloud-sdk"
+import { TokenStore, OAuthFlow } from "@kud/pcloud-auth"
 
 dotenv.config({ quiet: true })
 
@@ -110,7 +108,7 @@ program
       console.log("\n🎉 Setup complete!")
       console.log("   Your access has been saved securely.")
       console.log("   You can now use all pCloud CLI commands.\n")
-      console.log("Try: npm start list-trash\n")
+      console.log("Try: pcloud ls\n")
     } catch (error) {
       console.error("\n❌ Authentication failed.")
       console.error(
@@ -611,29 +609,51 @@ program
     },
   )
 
+const TRASH_OAUTH_WARNING =
+  "\n⚠  Trash endpoints require a session token.\n" +
+  "   pCloud's OAuth access tokens do not grant access to trash_list / trash_restore.\n" +
+  "   This is a pCloud API limitation — no workaround exists via OAuth.\n"
+
 program
   .command("list-trash")
-  .description("List files in trash")
+  .description(
+    "List files in trash (⚠ requires session auth — limited with OAuth)",
+  )
   .action(async () => {
     try {
       const api = await getAuthenticatedAPI()
       const response = await api.listTrash()
+      if (response.result === 1000) {
+        console.error(TRASH_OAUTH_WARNING)
+        process.exit(1)
+      }
       assertSuccess(response.result, response.error)
 
-      if (!response.contents || response.contents.length === 0) {
+      const items = (response.contents ?? []) as any[]
+      if (items.length === 0) {
         console.log("Trash is empty")
         return
       }
 
-      console.log("\nFiles in trash:")
-      console.log("================")
-      response.contents.forEach((item: PCloudTrashItem) => {
-        const date = new Date(item.deletetime * 1000).toLocaleString()
-        console.log(`\nFile ID: ${item.fileid}`)
-        console.log(`Name: ${item.name}`)
-        console.log(`Path: ${item.path}`)
-        console.log(`Deleted: ${date}`)
-        if (item.size) console.log(`Size: ${formatBytes(item.size)}`)
+      const idCol = 12
+      const nameCol = 40
+      const sizeCol = 12
+
+      console.log(
+        `${padEnd("File ID", idCol)}${padEnd("Name", nameCol)}${padEnd("Size", sizeCol)}Deleted`,
+      )
+      console.log("-".repeat(idCol + nameCol + sizeCol + 20))
+
+      items.forEach((item: any) => {
+        const deleted = item.deletetime
+          ? new Date(item.deletetime * 1000)
+              .toISOString()
+              .slice(0, 16)
+              .replace("T", " ")
+          : "-"
+        console.log(
+          `${padEnd(String(item.fileid ?? "-"), idCol)}${padEnd(item.name ?? "-", nameCol)}${padEnd(formatBytes(item.size ?? 0), sizeCol)}${deleted}`,
+        )
       })
     } catch (error) {
       handleError(error)
@@ -642,14 +662,20 @@ program
 
 program
   .command("restore-trash")
-  .description("Restore a file from trash")
+  .description(
+    "Restore a file from trash by file ID (⚠ requires session auth — limited with OAuth)",
+  )
   .argument("<fileid>", "File ID to restore")
   .action(async (fileid: string) => {
     try {
       const api = await getAuthenticatedAPI()
       const response = await api.restoreFromTrash(parseInt(fileid, 10))
+      if (response.result === 1000) {
+        console.error(TRASH_OAUTH_WARNING)
+        process.exit(1)
+      }
       assertSuccess(response.result, response.error)
-      console.log(`✓ Successfully restored file ${fileid}`)
+      console.log(`✓ File ${fileid} restored successfully.`)
     } catch (error) {
       handleError(error)
     }
