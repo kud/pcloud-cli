@@ -1,6 +1,6 @@
 {
   "name": "@kud/pcloud-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CLI tool for pCloud file operations — list, restore from trash and rewind",
   "homepage": "https://kud.github.io/pcloud-cli",
   "main": "dist/cli.js",
