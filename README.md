@@ -11,38 +11,17 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue?style=flat-square)](https://www.typescriptlang.org)
 [![MIT Licence](https://img.shields.io/badge/licence-MIT-green?style=flat-square)](LICENSE)
 
-CLI tool for pCloud file operations — list, restore from trash and rewind.
-
-<a href="https://kud.io/projects/pcloud-cli">Website</a> · <a href="https://kud.io/projects/pcloud-cli/docs">Documentation</a>
+Restore deleted pCloud files and rewind versions, all from the terminal.
 
 </div>
 
----
-
-CLI tool for pCloud file operations — list your trash, restore deleted files, browse version history, and rewind files to an earlier version, all from the terminal.
-
-## ✨ Features
-
-- List all files currently in pCloud trash
-- Restore individual files from trash by file ID
-- Browse version history for any file path
-- Restore a specific version to a new destination
-- OAuth 2.0 authentication — browser-based, token stored locally
-- Bypass stored credentials with an environment variable for CI use
-
-## 🚀 Install
+## Install
 
 ```bash
 npm install -g @kud/pcloud-cli
 ```
 
-## 📖 Documentation
-
-Full usage, options, and examples live on the docs site:
-
-**→ [kud.io/projects/pcloud-cli/docs](https://kud.io/projects/pcloud-cli/docs)**
-
-## 🔧 Development
+## Development
 
 Run directly from source without a build step:
 
@@ -57,6 +36,6 @@ Build compiled output to `dist/`:
 npm run build
 ```
 
-## License
+---
 
-MIT © [kud](https://github.com/kud)
+📚 **Full documentation → https://kud.io/projects/pcloud-cli/docs**
