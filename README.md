@@ -13,9 +13,15 @@
 
 CLI tool for pCloud file operations — list, restore from trash and rewind.
 
+<a href="https://kud.io/projects/pcloud-cli">Website</a> · <a href="https://kud.io/projects/pcloud-cli/docs">Documentation</a>
+
 </div>
 
-## Features
+---
+
+CLI tool for pCloud file operations — list your trash, restore deleted files, browse version history, and rewind files to an earlier version, all from the terminal.
+
+## ✨ Features
 
 - List all files currently in pCloud trash
 - Restore individual files from trash by file ID
@@ -24,99 +30,19 @@ CLI tool for pCloud file operations — list, restore from trash and rewind.
 - OAuth 2.0 authentication — browser-based, token stored locally
 - Bypass stored credentials with an environment variable for CI use
 
-## Installation
+## 🚀 Install
 
 ```bash
 npm install -g @kud/pcloud-cli
 ```
 
-## First-time Setup
+## 📖 Documentation
 
-Before running any command you need to authenticate against your pCloud account. This is a one-time step.
+Full usage, options, and examples live on the docs site:
 
-You will need a pCloud OAuth application. Create one at [pcloud.com/oauth2-apps](https://docs.pcloud.com/methods/oauth_2.0/), then expose the credentials:
+**→ [kud.io/projects/pcloud-cli/docs](https://kud.io/projects/pcloud-cli/docs)**
 
-```bash
-export PCLOUD_CLIENT_ID=your_client_id
-export PCLOUD_CLIENT_SECRET=your_client_secret
-```
-
-Then run:
-
-```bash
-pcloud login
-```
-
-This opens your browser to the pCloud authorisation page. After you approve access, pCloud redirects back to a local callback server on `localhost:3000` and the token is saved to `~/.config/pcloud/tokens.json` (mode `0600`). The CLI never sees your pCloud password.
-
-## Usage
-
-### Authentication
-
-```bash
-pcloud login
-pcloud logout
-```
-
-### Trash
-
-List all files in your pCloud trash:
-
-```bash
-pcloud list-trash
-```
-
-Outputs each file's ID, name, path, size, and deletion time.
-
-Restore a file from trash by its numeric file ID:
-
-```bash
-pcloud restore-trash <fileid>
-```
-
-Example:
-
-```bash
-pcloud restore-trash 12345678
-```
-
-### Rewind
-
-List version history events for a file path:
-
-```bash
-pcloud list-rewind <path>
-```
-
-Example:
-
-```bash
-pcloud list-rewind /Documents/report.pdf
-```
-
-Restore a specific version to a destination path:
-
-```bash
-pcloud restore-rewind <fileid> <destination>
-```
-
-Example:
-
-```bash
-pcloud restore-rewind 12345678 /Documents/report-restored.pdf
-```
-
-## Configuration
-
-| Variable               | Required         | Description                                      |
-| ---------------------- | ---------------- | ------------------------------------------------ |
-| `PCLOUD_CLIENT_ID`     | For `login` only | OAuth application client ID                      |
-| `PCLOUD_CLIENT_SECRET` | For `login` only | OAuth application client secret                  |
-| `PCLOUD_ACCESS_TOKEN`  | Optional         | Bypasses `~/.config/pcloud/tokens.json` entirely |
-
-When `PCLOUD_ACCESS_TOKEN` is set, no stored credentials are read or written. This is useful in CI or scripted contexts.
-
-## Development
+## 🔧 Development
 
 Run directly from source without a build step:
 
@@ -131,20 +57,6 @@ Build compiled output to `dist/`:
 npm run build
 ```
 
-## API
+## License
 
-The following pCloud API endpoints are used internally:
-
-| Endpoint           | Purpose                                      |
-| ------------------ | -------------------------------------------- |
-| `oauth2_token`     | Exchange authorisation code for access token |
-| `listtrash`        | List files in trash                          |
-| `trash_restore`    | Restore a file from trash                    |
-| `listrewindevents` | List version history for a path              |
-| `file_restore`     | Restore a version to a new path              |
-
-Full pCloud API reference: [docs.pcloud.com](https://docs.pcloud.com)
-
-## Licence
-
-[MIT](LICENSE)
+MIT © [kud](https://github.com/kud)
