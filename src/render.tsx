@@ -5,7 +5,7 @@ import type {
   PCloudDiffEntry,
   PCloudFolderItem,
   PCloudUserInfo,
-} from "@kud/pcloud-sdk"
+} from "@kud/pcloud"
 
 // One-shot render for non-interactive commands: mount, let Ink paint a single
 // frame, unmount. Without the immediate unmount the process would stay alive

@@ -11,13 +11,11 @@ import {
   PCloudPublink,
   PCloudRevision,
   PCloudShareItem,
-} from "@kud/pcloud-sdk"
-import {
   TokenStore,
   OAuthFlow,
   sessionLogin,
   resolveAuth,
-} from "@kud/pcloud-auth"
+} from "@kud/pcloud"
 import { renderAccount, renderChanges, renderFileList } from "./render.js"
 
 dotenv.config({ quiet: true })

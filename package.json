@@ -29,9 +29,8 @@
   },
   "dependencies": {
     "@inkjs/ui": "2.0.0",
-    "@kud/pcloud-auth": "0.1.0",
+    "@kud/pcloud": "0.1.1",
     "@kud/pcloud-ink": "0.1.0",
-    "@kud/pcloud-sdk": "0.1.0",
     "commander": "14.0.3",
     "dotenv": "17.4.2",
     "ink": "7.0.1",

@@ -10,8 +10,8 @@ import {
   PCloudFolderItem,
   PCloudTrashItem,
   PCloudRewindItem,
-} from "@kud/pcloud-sdk"
-import { resolveStoredAuth } from "@kud/pcloud-auth"
+  resolveStoredAuth,
+} from "@kud/pcloud"
 
 type Phase =
   | "loading"
