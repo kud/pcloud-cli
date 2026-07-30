@@ -55,11 +55,28 @@ const handleError = (error: unknown): never => {
   process.exit(1)
 }
 
+// 2000 "Log in failed" and 1000 "Log in required" are what a dead credential
+// looks like on every single command. Session tokens expire on a schedule — 30
+// days, or 7 idle — so this is a certainty rather than an edge case, and the
+// bare pCloud wording gives no clue that re-authenticating is the remedy.
+const CREDENTIAL_FAILURES = new Set([1000, 2000])
+
 const assertSuccess = (result: number, error?: string): void => {
-  if (result !== 0) {
-    console.error(`Error: ${error || "Unknown error"}`)
+  if (result === 0) return
+
+  if (CREDENTIAL_FAILURES.has(result)) {
+    const stored = tokenStore.load()
+    console.error(`Error: ${error || "Not authenticated"}\n`)
+    console.error(
+      stored?.auth
+        ? "Your session token is no longer valid — they expire after 30 days,\nor 7 days unused. Sign in again:\n\n  pcloud login --session\n"
+        : "Sign in again:\n\n  pcloud login\n",
+    )
     process.exit(1)
   }
+
+  console.error(`Error: ${error || "Unknown error"}`)
+  process.exit(1)
 }
 
 const formatBytes = (bytes: number): string => {
