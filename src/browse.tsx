@@ -11,7 +11,7 @@ import {
   PCloudTrashItem,
   PCloudRewindItem,
 } from "@kud/pcloud-sdk"
-import { TokenStore } from "@kud/pcloud-auth"
+import { resolveStoredAuth } from "@kud/pcloud-auth"
 
 type Phase =
   | "loading"
@@ -30,17 +30,11 @@ const parentPath = (path: string): string => {
 }
 
 const buildAPI = (): PCloudAPI => {
-  const tokenStore = new TokenStore()
-  const tokens = tokenStore.load()
-  if (!tokens) {
+  const api = resolveStoredAuth()
+  if (!api) {
     console.error("Not authenticated. Run `pcloud login` first.")
     process.exit(1)
   }
-  const apiServer = tokens.hostname
-    ? `https://${tokens.hostname}`
-    : "https://eapi.pcloud.com"
-  const api = new PCloudAPI(apiServer)
-  api.setAccessToken(tokens.access_token, apiServer)
   return api
 }
 

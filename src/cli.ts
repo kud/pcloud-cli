@@ -1,14 +1,24 @@
 #!/usr/bin/env node
+import { readFileSync } from "fs"
+import readline from "readline"
+import { Writable } from "stream"
 import { Command } from "commander"
 import dotenv from "dotenv"
 import {
   PCloudAPI,
+  PCloudDiffEntry,
   PCloudFolderItem,
   PCloudPublink,
   PCloudRevision,
   PCloudShareItem,
 } from "@kud/pcloud-sdk"
-import { TokenStore, OAuthFlow } from "@kud/pcloud-auth"
+import {
+  TokenStore,
+  OAuthFlow,
+  sessionLogin,
+  resolveAuth,
+} from "@kud/pcloud-auth"
+import { renderAccount, renderChanges, renderFileList } from "./render.js"
 
 dotenv.config({ quiet: true })
 
@@ -20,35 +30,26 @@ const authBaseUrl = "https://my.pcloud.com"
 const defaultApiServer =
   region === "us" ? "https://api.pcloud.com" : "https://eapi.pcloud.com"
 
+const pkg = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+) as { version: string }
+
 program
   .name("pcloud-cli")
   .description("CLI tool for pCloud file operations")
-  .version("1.0.0")
+  .version(pkg.version)
 
 const getAuthenticatedAPI = async (): Promise<PCloudAPI> => {
-  const accessToken = process.env.PCLOUD_ACCESS_TOKEN
-  if (accessToken) {
-    const api = new PCloudAPI()
-    api.setAccessToken(accessToken)
-    return api
+  try {
+    return await resolveAuth({ defaultApiServer })
+  } catch {
+    console.error("\n❌ Not authenticated!\n")
+    console.error("It looks like you haven't set up pCloud CLI yet.\n")
+    console.error("Please run this command first:\n")
+    console.error("  pcloud login\n")
+    console.error("This is a one-time setup that takes less than a minute.\n")
+    process.exit(1)
   }
-
-  const tokens = tokenStore.load()
-  if (tokens) {
-    const apiServer = tokens.hostname
-      ? `https://${tokens.hostname}`
-      : defaultApiServer
-    const api = new PCloudAPI(apiServer)
-    api.setAccessToken(tokens.access_token, apiServer)
-    return api
-  }
-
-  console.error("\n❌ Not authenticated!\n")
-  console.error("It looks like you haven't set up pCloud CLI yet.\n")
-  console.error("Please run this command first:\n")
-  console.error("  pcloud login\n")
-  console.error("This is a one-time setup that takes less than a minute.\n")
-  process.exit(1)
 }
 
 const handleError = (error: unknown): never => {
@@ -74,10 +75,120 @@ const formatBytes = (bytes: number): string => {
 const padEnd = (str: string, length: number): string =>
   str.length >= length ? str : str + " ".repeat(length - str.length)
 
+const tally = <T>(items: T[], key: (item: T) => string): [string, number][] => {
+  const counts = new Map<string, number>()
+  items.forEach((item) => {
+    const k = key(item)
+    counts.set(k, (counts.get(k) ?? 0) + 1)
+  })
+  return [...counts.entries()]
+}
+
+const printChangeSummary = (entries: PCloudDiffEntry[]): void => {
+  console.log("By event type:")
+  tally(entries, (entry) => entry.event)
+    .sort((a, b) => b[1] - a[1])
+    .forEach(([event, count]) => console.log(`  ${padEnd(event, 18)}${count}`))
+
+  console.log("\nBy minute:")
+  tally(entries, (entry) =>
+    (entry.time ?? "?").replace(/:\d\d \+\d+$/, ""),
+  ).forEach(([minute, count]) => console.log(`  ${padEnd(minute, 26)}${count}`))
+
+  console.log(`\n${entries.length} events`)
+}
+
+const ask = (question: string): Promise<string> =>
+  new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    })
+    rl.question(question, (answer) => {
+      rl.close()
+      resolve(answer.trim())
+    })
+  })
+
+const askHidden = (question: string): Promise<string> => {
+  let muted = false
+  const output = new Writable({
+    write(chunk, encoding, callback) {
+      if (!muted) process.stdout.write(chunk, encoding as BufferEncoding)
+      callback()
+    },
+  })
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output,
+    terminal: true,
+  })
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close()
+      process.stdout.write("\n")
+      resolve(answer)
+    })
+    muted = true
+  })
+}
+
+const runSessionLogin = async (): Promise<void> => {
+  console.log("\n🔐 pCloud session login\n")
+  console.log(
+    "Session tokens reach the parts OAuth cannot: revisions, trash, zip",
+  )
+  console.log("and downloads. Your password is sent to pCloud over HTTPS and")
+  console.log("is never written to disk — only the returned token is stored.\n")
+
+  const username = await ask("Email: ")
+  const password = await askHidden("Password: ")
+
+  const { auth, apiServer, expiresAt } = await sessionLogin({
+    username,
+    password,
+    apiServer: defaultApiServer,
+    requestCode: async () => ask("Two-factor code: "),
+  })
+
+  const stored = tokenStore.load()
+  tokenStore.save({
+    ...stored,
+    auth,
+    expiresAt,
+    hostname: new URL(apiServer).host,
+  })
+
+  console.log("\n✓ Session token saved.")
+  if (expiresAt) {
+    console.log(`  Expires ${new Date(expiresAt).toLocaleString()}`)
+    console.log("  Also expires after 7 days unused.")
+  }
+  console.log("  Revoke any time with: pcloud logout\n")
+  console.log("Try: pcloud list-trash\n")
+}
+
 program
   .command("login")
   .description("Set up authentication with pCloud")
-  .action(async () => {
+  .option(
+    "--session",
+    "Log in with email and password for a session token (unlocks revisions, trash, zip, downloads)",
+  )
+  .action(async (options) => {
+    if (options.session) {
+      try {
+        await runSessionLogin()
+        return
+      } catch (error) {
+        console.error("\n❌ Session login failed.")
+        console.error(
+          `   ${error instanceof Error ? error.message : "Unknown error"}\n`,
+        )
+        process.exit(1)
+      }
+    }
+
     try {
       console.log("\n🔐 Welcome to pCloud CLI Setup!\n")
       console.log("You will be redirected to pCloud in your browser to log in.")
@@ -120,14 +231,37 @@ program
 
 program
   .command("logout")
-  .description("Remove stored credentials")
-  .action(() => {
-    if (tokenStore.exists()) {
-      tokenStore.delete()
-      console.log("✓ Logged out successfully")
-    } else {
+  .description("Revoke the session token and remove stored credentials")
+  .action(async () => {
+    const stored = tokenStore.load()
+    if (!stored) {
       console.log("No stored credentials found")
+      return
     }
+
+    // Deleting the local file leaves a session token live on pCloud until it
+    // expires, so revoke first and only report success for what actually happened.
+    if (stored.auth) {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.logout()
+        console.log(
+          response.auth_deleted
+            ? "✓ Session token revoked on pCloud"
+            : "⚠ pCloud did not confirm revocation — check pcloud.com → Settings → Devices",
+        )
+      } catch (error) {
+        console.error(
+          `⚠ Could not reach pCloud to revoke the token: ${error instanceof Error ? error.message : error}`,
+        )
+        console.error(
+          "  The token may still be valid. Revoke it at pcloud.com.",
+        )
+      }
+    }
+
+    tokenStore.delete()
+    console.log("✓ Local credentials removed")
   })
 
 program
@@ -138,12 +272,7 @@ program
       const api = await getAuthenticatedAPI()
       const response = await api.userInfo()
       assertSuccess(response.result, response.error)
-      const usedPct = ((response.usedquota / response.quota) * 100).toFixed(1)
-      console.log(`Email:  ${response.email}`)
-      console.log(`Plan:   ${response.plan}`)
-      console.log(
-        `Quota:  ${formatBytes(response.usedquota)} / ${formatBytes(response.quota)} (${usedPct}% used)`,
-      )
+      renderAccount(response)
     } catch (error) {
       handleError(error)
     }
@@ -159,30 +288,7 @@ program
       const response = await api.listFolder(path)
       assertSuccess(response.result, response.error)
 
-      const items = response.metadata?.contents ?? []
-
-      if (items.length === 0) {
-        console.log("Empty folder")
-        return
-      }
-
-      const typeCol = 6
-      const nameCol = 40
-      const sizeCol = 12
-
-      console.log(
-        `${padEnd("Type", typeCol)}${padEnd("Name", nameCol)}${padEnd("Size", sizeCol)}Modified`,
-      )
-      console.log("-".repeat(typeCol + nameCol + sizeCol + 20))
-
-      items.forEach((item: PCloudFolderItem) => {
-        const type = item.isfolder ? "dir" : "file"
-        const size = item.isfolder ? "-" : formatBytes(item.size ?? 0)
-        const modified = item.modified ?? "-"
-        console.log(
-          `${padEnd(type, typeCol)}${padEnd(item.name, nameCol)}${padEnd(size, sizeCol)}${modified}`,
-        )
-      })
+      renderFileList(response.metadata?.contents ?? [])
     } catch (error) {
       handleError(error)
     }
@@ -681,45 +787,83 @@ program
     }
   })
 
+// Rewind is a pCloud web-app feature with no public API behind it: the
+// endpoints these commands were written against (listrewindevents, file_restore)
+// 404 at the router, as do listrewind, rewind, rewindlist and listrewindfiles.
+// Kept as signposts so the command name leads somewhere useful instead of
+// failing with a bare HTTP 404.
+const rewindUnavailable = (): never => {
+  console.error("Rewind is not available through the pCloud API.\n")
+  console.error("It exists only in the pCloud web app, at pcloud.com.\n")
+  console.error("From here, the closest equivalents are:")
+  console.error(
+    "  pcloud changes         see what was created, changed or deleted, and when",
+  )
+  console.error(
+    "  pcloud list-revisions  list previous versions of a single file",
+  )
+  console.error("  pcloud list-trash      list recoverable deleted files\n")
+  process.exit(1)
+}
+
 program
   .command("list-rewind")
-  .description("List rewind events for a path")
-  .argument("<path>", "Path to check (e.g., /myfile.txt)")
-  .action(async (path: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.listRewindFiles(path)
-      assertSuccess(response.result, response.error)
-
-      if (!response.contents || response.contents.length === 0) {
-        console.log("No rewind events found")
-        return
-      }
-
-      console.log(`\nRewind events for ${path}:`)
-      console.log("================")
-      response.contents.forEach((item: any) => {
-        const date = new Date(item.time * 1000).toLocaleString()
-        console.log(`\nFile ID: ${item.fileid}`)
-        console.log(`Name: ${item.name}`)
-        console.log(`Time: ${date}`)
-      })
-    } catch (error) {
-      handleError(error)
-    }
-  })
+  .description("Unavailable — Rewind has no public API (see `pcloud changes`)")
+  .argument("[path]", "Path to check (e.g., /myfile.txt)")
+  .action(rewindUnavailable)
 
 program
   .command("restore-rewind")
-  .description("Restore a file from rewind")
-  .argument("<fileid>", "File ID to restore")
-  .argument("<topath>", "Destination path (e.g., /restored-file.txt)")
-  .action(async (fileid: string, topath: string) => {
+  .description("Unavailable — Rewind has no public API (see `pcloud changes`)")
+  .argument("[fileid]", "File ID to restore")
+  .argument("[topath]", "Destination path (e.g., /restored-file.txt)")
+  .action(rewindUnavailable)
+
+program
+  .command("changes")
+  .description(
+    "Show account change history — what was created, modified or deleted, and when",
+  )
+  .option("-n, --last <n>", "Number of most recent events to fetch", "200")
+  .option("--after <datetime>", "Only events after this datetime")
+  .option("--deleted", "Only deletions")
+  .option("--event <type...>", "Filter by event type (e.g. deletefile)")
+  .option("--summary", "Group counts by minute and by event type")
+  .option("--json", "Output raw JSON")
+  .action(async (options) => {
     try {
       const api = await getAuthenticatedAPI()
-      const response = await api.restoreFromRewind(parseInt(fileid, 10), topath)
+      const response = await api.diff(
+        options.after
+          ? { after: options.after }
+          : { last: parseInt(options.last, 10) },
+      )
       assertSuccess(response.result, response.error)
-      console.log(`✓ Successfully restored file ${fileid} to ${topath}`)
+
+      const wanted = new Set<string>(options.event ?? [])
+      const entries = (response.entries ?? []).filter(
+        (entry) =>
+          (!options.deleted || entry.event.startsWith("delete")) &&
+          (wanted.size === 0 || wanted.has(entry.event)),
+      )
+
+      if (options.json) {
+        console.log(JSON.stringify(entries, null, 2))
+        return
+      }
+
+      if (entries.length === 0) {
+        console.log("No matching events")
+        return
+      }
+
+      if (options.summary) {
+        printChangeSummary(entries)
+        return
+      }
+
+      renderChanges(entries)
+      console.log(`\n${entries.length} events`)
     } catch (error) {
       handleError(error)
     }
