@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-31
+
+### Added
+
+- **The Rewind tab in `pcloud browse` now rewinds.** It has always been a change log with single-row undo, which is a useful thing but not the thing its name promised — the actual bulk rewind existed only as `pcloud rewind` on the command line. Pressing enter on any event now offers "Rewind everything to just before this", which plans the same undo the CLI does and asks before applying it, stating exactly how many files it will restore and revert. Creations are counted and left alone, since the only way to undo one is to delete real data.
+
+### Fixed
+
+- The Rewind action modal no longer renders as a single garbled line. The list claimed every row the terminal had, so any overlay drawn beneath it had nowhere to go and its label and hint were composited into the same cell. The list now gives up rows to whatever overlay is open.
+- Pressing enter on a Rewind event that cannot be undone used to do nothing at all, which is indistinguishable from a broken key. It now says why.
+- Deleted **folders** in the Rewind tab offered no recovery action. Restoring a folder needs its `folderid` and only `fileid` was ever consulted — so the events that fill the trash in the first place were the ones you could not act on. This was already fixed once in the Trash tab; the Rewind path had its own copy of the logic and its own copy of the bug.
+- "Revert to previous revision" took whichever revision the API happened to return first rather than the most recent one, so it could undo far more than the last edit.
+- The preview panel in the Rewind tab showed whatever was selected in Files before you switched tabs. It now describes the selected change.
+- Image previews are no longer squashed. Both a width and a height were passed to the image renderer, which then treats them as an exact box and discards the image's aspect ratio — a landscape screenshot was forced into the panel's portrait shape. Width is now the only size given and the panel height is a bound. The rendering protocol is also auto-detected rather than pinned to half-blocks, so terminals with native image support (iTerm2, Kitty, WezTerm) show a real image at true proportions.
+
+### Changed
+
+- `planRewind`, `applyRewind` and the diff path resolver moved into `@kud/pcloud` so the CLI and the browser share one implementation. Two of the bugs above existed only because the browser had reimplemented logic the CLI already had right.
+
+[0.9.0]: https://github.com/kud/pcloud-cli/compare/v0.8.0...v0.9.0
+
 ## [0.8.0] - 2026-07-31
 
 ### Changed
