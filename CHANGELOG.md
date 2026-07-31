@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-31
+
+### Changed
+
+- **`pcloud login` now logs in with your email and password by default.** The browser-based OAuth flow has moved to `pcloud login --oauth`. The old default required you to register a pCloud OAuth application first and then reached _less_ of the API than the alternative — OAuth access tokens cannot touch revisions, trash, zip or downloads, and there is no workaround. Session login needs no setup and reaches everything, so it becomes the default. `--session` is still accepted and does nothing, since it now describes the default.
+- If you have `PCLOUD_CLIENT_ID` and `PCLOUD_CLIENT_SECRET` exported and want the browser flow, add `--oauth`. Stored credentials are untouched by this change — nobody is logged out.
+
+### Fixed
+
+- `pcloud login` no longer announces "You will be redirected to pCloud in your browser" before checking whether it has the credentials to do so. The check now runs first, and when it fails it points at the setup-free alternative rather than only naming the two environment variables.
+- Passing `--oauth` and `--session` together is now refused instead of silently picking one.
+
+### Documentation
+
+- Authentication docs rewritten to cover both login methods, opening with a comparison of what each costs and what each reaches. The session flow was previously undocumented.
+- Corrected the introduction, which still claimed Node 20 (0.7.0 raised the floor to 24), described authentication as OAuth-only, and did not mention the `sync` commands added in 0.7.0.
+
+[0.8.0]: https://github.com/kud/pcloud-cli/compare/v0.7.1...v0.8.0
+
 ## [0.7.1] - 2026-07-31
 
 ### Fixed
