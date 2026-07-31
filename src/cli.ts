@@ -785,20 +785,47 @@ program
 
 program
   .command("restore-trash")
-  .description(
-    "Restore a file from trash by file ID (⚠ requires session auth — limited with OAuth)",
+  .description("Restore a file or folder from trash by ID")
+  .argument("<id>", "File ID, or folder ID with --folder")
+  .option("--folder", "Treat the ID as a folder, restoring its whole tree")
+  .option(
+    "--to <path>",
+    "Restore into this folder instead of the original location",
   )
-  .argument("<fileid>", "File ID to restore")
-  .action(async (fileid: string) => {
+  .action(async (id: string, options) => {
     try {
       const api = await getAuthenticatedAPI()
-      const response = await api.restoreFromTrash(parseInt(fileid, 10))
+
+      // Naming a destination means resolving it first: pCloud wants a folderid,
+      // and a path that does not exist should fail here rather than halfway
+      // through restoring a tree.
+      let restoreTo: number | undefined
+      if (options.to) {
+        const target = await api.stat(options.to)
+        const folderid = (target.metadata as { folderid?: number } | undefined)
+          ?.folderid
+        if (target.result !== 0 || folderid === undefined) {
+          console.error(`Error: no such destination folder: ${options.to}`)
+          process.exit(1)
+        }
+        restoreTo = folderid
+      }
+
+      const numeric = parseInt(id, 10)
+      const response = options.folder
+        ? await api.restoreFolderFromTrash(numeric, { restoreTo })
+        : await api.restoreFromTrash(numeric, { restoreTo })
+
       if (response.result === 1000) {
         console.error(TRASH_OAUTH_WARNING)
         process.exit(1)
       }
       assertSuccess(response.result, response.error)
-      console.log(`✓ File ${fileid} restored successfully.`)
+
+      const where = (response.metadata as { path?: string } | undefined)?.path
+      console.log(
+        `✓ Restored ${options.folder ? "folder" : "file"} ${id}${where ? ` to ${where}` : ""}.`,
+      )
     } catch (error) {
       handleError(error)
     }
