@@ -210,3 +210,33 @@ describe("isWritable", () => {
     expect(isWritable("language")).toBe(false)
   })
 })
+
+// The parsing bug that overwrote a live ignore list: `--paths` was declared on
+// both the parent `ignore` command and its `set` subcommand, so commander bound
+// it to the parent and `set` saw no flag — writing the paths list into
+// ignorepatterns. Asserting on the shape of the fix rather than on commander.
+describe("the writable keys are distinguishable, not interchangeable", () => {
+  it("keeps patterns and paths as separate keys", () => {
+    expect(WRITABLE_SETTINGS).toContain("ignorepatterns")
+    expect(WRITABLE_SETTINGS).toContain("ignorepaths")
+    expect(new Set(WRITABLE_SETTINGS).size).toBe(WRITABLE_SETTINGS.length)
+  })
+
+  it("writes only the key it was given", () => {
+    const { path, cleanup } = fixture()
+    try {
+      writeSettings({ ignorepaths: formatList(["/System"]) }, path, new Date(), {
+        force: true,
+      })
+      // The patterns list must be exactly as the fixture left it.
+      expect(parseList(readSettings(path).ignorepatterns)).toContain(
+        "node_modules",
+      )
+      expect(parseList(readSettings(path).ignorepatterns)).not.toContain(
+        "/System",
+      )
+    } finally {
+      cleanup()
+    }
+  })
+})

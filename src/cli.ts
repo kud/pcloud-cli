@@ -61,6 +61,13 @@ import {
 dotenv.config({ quiet: true })
 
 const program = new Command()
+
+// Options bind to the subcommand they follow, rather than being hoisted to the
+// nearest ancestor that happens to declare the same name. Without this,
+// `settings ignore set --paths …` handed --paths to the parent `ignore`
+// command, so `set` saw no flag and rewrote ignorepatterns with the paths
+// list — on a live database, before there was a dry run to catch it.
+program.enablePositionalOptions()
 const tokenStore = new TokenStore()
 
 const region = (process.env.PCLOUD_REGION ?? "eu").toLowerCase()
@@ -1520,16 +1527,36 @@ const settings = program
   .action(() => {
     try {
       const values = readSettings()
+      // A raw dump reads as noise: "minlocalfreespace 2147000000" and
+      // "enableddrive 1" are the same shape on screen and nothing alike in
+      // meaning. Each key gets the rendering its unit deserves.
+      const humanise = (key: string): string => {
+        const raw = values[key]
+        if (raw === undefined) return "-"
+        if (key === "ignorepatterns" || key === "ignorepaths") {
+          const entries = parseList(raw)
+          return `${entries.length} · ${entries.slice(0, 3).join(", ")}${entries.length > 3 ? " …" : ""}`
+        }
+        if (key === "minlocalfreespace") return formatBytes(Number(raw))
+        if (key === "autostartfs" || key === "enableddrive")
+          return raw === "1" ? "on" : "off"
+        return raw
+      }
+      const LABELS: Record<string, string> = {
+        ignorepatterns: "Ignored names",
+        ignorepaths: "Ignored paths",
+        language: "Language",
+        minlocalfreespace: "Min free space",
+        autostartfs: "Start at login",
+        enableddrive: "Drive mounted",
+      }
       const rows = READABLE_SETTINGS.map((key) => ({
-        setting: key,
-        value:
-          key === "ignorepatterns" || key === "ignorepaths"
-            ? `${parseList(values[key]).length} entries`
-            : (values[key] ?? "-"),
+        setting: LABELS[key] ?? key,
+        value: humanise(key),
       }))
       renderTable(rows, [
-        { key: "setting", header: "Setting", width: 22 },
-        { key: "value", header: "Value", width: 40 },
+        { key: "setting", header: "Setting", width: 18 },
+        { key: "value", header: "Value", width: 52 },
       ])
       console.log("\n  pcloud settings ignore            list the ignore rules")
       console.log("  pcloud settings ignore add <p...> add patterns\n")
@@ -1567,10 +1594,11 @@ const showIgnore = (paths: boolean): void => {
 const applyIgnore = (
   next: string[],
   paths: boolean,
-  options: { force?: boolean },
+  options: { force?: boolean; apply?: boolean; db?: string },
 ): void => {
   const key = ignoreKey(paths)
-  const current = parseList(readSettings()[key])
+  const dbPath = options.db ?? PCLOUD_DB
+  const current = parseList(readSettings(dbPath)[key])
 
   if (sameSet(current, next)) {
     console.log(`✓ ${key} already matches — nothing to do`)
@@ -1583,19 +1611,22 @@ const applyIgnore = (
   const removed = current.filter(
     (entry) => !next.some((n) => n.toLowerCase() === entry.toLowerCase()),
   )
-  // Refuse before announcing anything: printing a diff and then failing reads
-  // as a partial write.
-  assertWritable({ force: options.force })
-
+  console.log(`${key}:`)
   added.forEach((entry) => console.log(`  + ${entry}`))
   removed.forEach((entry) => console.log(`  - ${entry}`))
 
-  const { backup } = writeSettings(
-    { [key]: formatList(next) },
-    PCLOUD_DB,
-    new Date(),
-    { force: options.force },
-  )
+  if (!options.apply) {
+    console.log(`\nDry run. Re-run with --apply to write.\n`)
+    return
+  }
+
+  // Refuse before writing rather than after: announcing a change and then
+  // failing reads as a partial write.
+  assertWritable({ force: options.force })
+
+  const { backup } = writeSettings({ [key]: formatList(next) }, dbPath, new Date(), {
+    force: options.force,
+  })
   console.log(`\n✓ ${key} updated. Previous database: ${backup}\n`)
 }
 
@@ -1611,9 +1642,18 @@ const ignore = settings
     }
   })
 
+// --apply, matching `pcloud sync prune`: this rewrites what pCloud will and
+// will not synchronise, and the first version shipped without it overwrote a
+// live ignore list within minutes. Destructive commands in this CLI are dry by
+// default. --db exists for the same reason prune has it — so the write path is
+// testable against a copy rather than only against the real thing.
+ignore.enablePositionalOptions()
+
 const ignoreWriteOptions = <T extends Command>(command: T): T =>
   command
     .option("--paths", "Operate on ignorepaths rather than ignorepatterns")
+    .option("--apply", "Perform the write (default is a dry run)")
+    .option("--db <path>", "Operate on a different database file", PCLOUD_DB)
     .option(
       "--force",
       "Write even though pCloud Drive is running (it will overwrite this on quit)",
@@ -1627,7 +1667,7 @@ ignoreWriteOptions(
 ).action((patterns: string[], options) => {
   try {
     const paths = options.paths === true
-    const current = parseList(readSettings()[ignoreKey(paths)])
+    const current = parseList(readSettings(options.db)[ignoreKey(paths)])
     const next = [
       ...current,
       ...patterns.filter(
@@ -1649,7 +1689,7 @@ ignoreWriteOptions(
   try {
     const paths = options.paths === true
     const drop = new Set(patterns.map((p) => p.toLowerCase()))
-    const next = parseList(readSettings()[ignoreKey(paths)]).filter(
+    const next = parseList(readSettings(options.db)[ignoreKey(paths)]).filter(
       (entry) => !drop.has(entry.toLowerCase()),
     )
     applyIgnore(next, paths, options)

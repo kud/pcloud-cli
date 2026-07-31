@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2026-07-31
+
+### Fixed
+
+- **`pcloud settings ignore set --paths` wrote the paths list into the patterns list.** `--paths` was declared on both the `ignore` command and its `set` subcommand, so commander bound it to the parent and the subcommand saw no flag at all. Options now bind to the subcommand they follow.
+- **Writes are a dry run by default**, matching `pcloud sync prune`. The first version of these commands shipped without one and rewrote a live ignore list. Add `--apply` to write; `--db <path>` operates on a copy.
+- `pcloud settings` is readable: sizes render as sizes, flags as on/off, and the ignore lists show a count with a sample rather than the bare number of entries.
+
+[0.15.1]: https://github.com/kud/pcloud-cli/compare/v0.15.0...v0.15.1
+
 ## [0.15.0] - 2026-07-31
 
 ### Added
