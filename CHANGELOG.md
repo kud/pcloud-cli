@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-07-31
+
+### Fixed
+
+- `pcloud browse` no longer exits silently when you are not logged in. The authentication check was running inside the browser's render, by which point the terminal had already switched to the alternate screen buffer — so the "Not authenticated" message was written to a buffer that was discarded microseconds later, and the command appeared to do nothing at all. The check now runs before the browser mounts, so `browse` fails with the same clear "run `pcloud login`" guidance as every other command.
+
+[0.7.1]: https://github.com/kud/pcloud-cli/compare/v0.7.0...v0.7.1
+
 ## [0.7.0] - 2026-07-31
 
 ### Added
