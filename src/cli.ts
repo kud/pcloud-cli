@@ -18,10 +18,11 @@ import {
   sessionLogin,
   resolveAuth,
   resolveStoredAuth,
+  planRewind,
+  applyRewind,
+  pathResolver
 } from "@kud/pcloud"
 import { renderAccount, renderChanges, renderFileList } from "./render.js"
-import { planRewind, applyRewind } from "./rewind.js"
-import { pathResolver } from "./lib/paths.js"
 import { checkAll } from "./lib/health.js"
 import {
   PCLOUD_DB,
