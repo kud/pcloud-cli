@@ -48,6 +48,15 @@ import {
   verdicts,
   type SyncPair,
 } from "./lib/sync.js"
+import {
+  READABLE_SETTINGS,
+  assertWritable,
+  formatList,
+  parseList,
+  readSettings,
+  sameSet,
+  writeSettings,
+} from "./lib/settings.js"
 
 dotenv.config({ quiet: true })
 
@@ -1499,6 +1508,168 @@ program
     const { startBrowse } = await import("./browse.js")
     await startBrowse()
   })
+
+// pCloud's client settings live in this machine's own database rather than in
+// the account, so they are the one part of a pCloud setup that config
+// management has to reach into. Owning that here — beside `pcloud sync`, which
+// already reads the same file — keeps the format in one place rather than
+// reimplemented in whatever shell script needs it.
+const settings = program
+  .command("settings")
+  .description("Show pCloud Drive's local client settings")
+  .action(() => {
+    try {
+      const values = readSettings()
+      const rows = READABLE_SETTINGS.map((key) => ({
+        setting: key,
+        value:
+          key === "ignorepatterns" || key === "ignorepaths"
+            ? `${parseList(values[key]).length} entries`
+            : (values[key] ?? "-"),
+      }))
+      renderTable(rows, [
+        { key: "setting", header: "Setting", width: 22 },
+        { key: "value", header: "Value", width: 40 },
+      ])
+      console.log("\n  pcloud settings ignore            list the ignore rules")
+      console.log("  pcloud settings ignore add <p...> add patterns\n")
+    } catch (error) {
+      handleError(error)
+    }
+  })
+
+const ignoreKey = (paths: boolean): "ignorepaths" | "ignorepatterns" =>
+  paths ? "ignorepaths" : "ignorepatterns"
+
+const showIgnore = (paths: boolean): void => {
+  const key = ignoreKey(paths)
+  const entries = parseList(readSettings()[key])
+  if (entries.length === 0) {
+    console.log(`No ${key} configured`)
+    return
+  }
+  renderTable(
+    entries.map((pattern) => ({ pattern })),
+    [
+      {
+        key: "pattern",
+        header: key === "ignorepaths" ? "Path" : "Pattern",
+        width: 40,
+      },
+    ],
+  )
+  console.log(`\n${entries.length} entries\n`)
+}
+
+// add / remove / set rather than a single --edit: config management wants `set`
+// to be declarative and idempotent, while a person at a terminal wants to nudge
+// one entry without restating the list.
+const applyIgnore = (
+  next: string[],
+  paths: boolean,
+  options: { force?: boolean },
+): void => {
+  const key = ignoreKey(paths)
+  const current = parseList(readSettings()[key])
+
+  if (sameSet(current, next)) {
+    console.log(`✓ ${key} already matches — nothing to do`)
+    return
+  }
+
+  const added = next.filter(
+    (entry) => !current.some((c) => c.toLowerCase() === entry.toLowerCase()),
+  )
+  const removed = current.filter(
+    (entry) => !next.some((n) => n.toLowerCase() === entry.toLowerCase()),
+  )
+  // Refuse before announcing anything: printing a diff and then failing reads
+  // as a partial write.
+  assertWritable({ force: options.force })
+
+  added.forEach((entry) => console.log(`  + ${entry}`))
+  removed.forEach((entry) => console.log(`  - ${entry}`))
+
+  const { backup } = writeSettings(
+    { [key]: formatList(next) },
+    PCLOUD_DB,
+    new Date(),
+    { force: options.force },
+  )
+  console.log(`\n✓ ${key} updated. Previous database: ${backup}\n`)
+}
+
+const ignore = settings
+  .command("ignore")
+  .description("Show the names and paths pCloud Drive refuses to sync")
+  .option("--paths", "Operate on ignorepaths rather than ignorepatterns")
+  .action((options) => {
+    try {
+      showIgnore(options.paths === true)
+    } catch (error) {
+      handleError(error)
+    }
+  })
+
+const ignoreWriteOptions = <T extends Command>(command: T): T =>
+  command
+    .option("--paths", "Operate on ignorepaths rather than ignorepatterns")
+    .option(
+      "--force",
+      "Write even though pCloud Drive is running (it will overwrite this on quit)",
+    ) as T
+
+ignoreWriteOptions(
+  ignore
+    .command("add")
+    .description("Add patterns, leaving the rest of the list alone")
+    .argument("<patterns...>", "Patterns to add"),
+).action((patterns: string[], options) => {
+  try {
+    const paths = options.paths === true
+    const current = parseList(readSettings()[ignoreKey(paths)])
+    const next = [
+      ...current,
+      ...patterns.filter(
+        (p) => !current.some((c) => c.toLowerCase() === p.toLowerCase()),
+      ),
+    ]
+    applyIgnore(next, paths, options)
+  } catch (error) {
+    handleError(error)
+  }
+})
+
+ignoreWriteOptions(
+  ignore
+    .command("remove")
+    .description("Remove patterns, leaving the rest of the list alone")
+    .argument("<patterns...>", "Patterns to remove"),
+).action((patterns: string[], options) => {
+  try {
+    const paths = options.paths === true
+    const drop = new Set(patterns.map((p) => p.toLowerCase()))
+    const next = parseList(readSettings()[ignoreKey(paths)]).filter(
+      (entry) => !drop.has(entry.toLowerCase()),
+    )
+    applyIgnore(next, paths, options)
+  } catch (error) {
+    handleError(error)
+  }
+})
+
+ignoreWriteOptions(
+  ignore
+    .command("set")
+    .description("Replace the whole list — declarative, for config management")
+    .argument("<patterns...>", "The complete list of patterns"),
+).action((patterns: string[], options) => {
+  try {
+    applyIgnore(patterns, options.paths === true, options)
+  } catch (error) {
+    handleError(error)
+  }
+})
 
 // Bare `pcloud` opens the browser, the way k9s, lazygit and btop do: once a
 // tool has a full interface, that interface is the tool and needs no verb.

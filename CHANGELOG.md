@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-07-31
+
+### Added
+
+- **`pcloud settings`** reads pCloud Drive's local client settings, and **`pcloud settings ignore`** manages what it refuses to sync. These live in each machine's own `~/.pcloud/data.db` rather than in your account, so a folder ignored on one laptop uploads freely from another — which is how a `node_modules` tree ends up in the cloud with no machine considering itself responsible for it.
+  - `pcloud settings ignore` — list the rules.
+  - `pcloud settings ignore add|remove <patterns...>` — nudge one entry.
+  - `pcloud settings ignore set <patterns...>` — replace the list. Declarative and idempotent, for config management.
+  - `--paths` operates on `ignorepaths` instead of `ignorepatterns`.
+- Writes refuse while pCloud Drive is running, because it rewrites its settings from memory when it quits and would silently undo the change long after the command reported success. `--force` overrides, and says what it costs.
+- Only two keys are writable and six readable, by allowlist rather than deny-list. The same table holds your session token, and a deny-list would leak whatever sensitive key pCloud adds in a future release.
+
+### Fixed
+
+- The build no longer ships stale output. `tsc` does not remove artefacts for deleted sources, so a module moved into `@kud/pcloud` this morning was still being published from `dist/`. `npm run build` now cleans first.
+
+[0.15.0]: https://github.com/kud/pcloud-cli/compare/v0.14.0...v0.15.0
+
 ## [0.14.0] - 2026-07-31
 
 ### Added

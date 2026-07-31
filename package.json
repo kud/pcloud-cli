@@ -8,11 +8,13 @@
     "pcloud": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "npm run clean && tsc",
     "start": "node dist/cli.js",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
   },
   "engines": {
     "node": ">=24"
