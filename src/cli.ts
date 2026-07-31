@@ -760,16 +760,19 @@ program
         return
       }
 
-      const idCol = 12
-      const nameCol = 40
-      const sizeCol = 12
+      const idCol = 14
+      const nameCol = 44
 
+      // Printing fileid alone left every folder showing "-", and trash is
+      // mostly folders — so the id needed to restore something was exactly the
+      // one the listing would not show.
       console.log(
-        `${padEnd("File ID", idCol)}${padEnd("Name", nameCol)}${padEnd("Size", sizeCol)}Deleted`,
+        `${padEnd("Kind", 6)}${padEnd("ID", idCol)}${padEnd("Name", nameCol)}${padEnd("Size", 12)}Deleted`,
       )
-      console.log("-".repeat(idCol + nameCol + sizeCol + 20))
+      console.log("-".repeat(6 + idCol + nameCol + 12 + 20))
 
       items.forEach((item: any) => {
+        const isFolder = item.folderid !== undefined
         const deleted = item.deletetime
           ? new Date(item.deletetime * 1000)
               .toISOString()
@@ -777,9 +780,18 @@ program
               .replace("T", " ")
           : "-"
         console.log(
-          `${padEnd(String(item.fileid ?? "-"), idCol)}${padEnd(item.name ?? "-", nameCol)}${padEnd(formatBytes(item.size ?? 0), sizeCol)}${deleted}`,
+          [
+            padEnd(isFolder ? "dir" : "file", 6),
+            padEnd(String(item.folderid ?? item.fileid ?? "-"), idCol),
+            padEnd(item.name ?? "-", nameCol),
+            padEnd(isFolder ? "-" : formatBytes(item.size ?? 0), 12),
+            deleted,
+          ].join(""),
         )
       })
+
+      console.log(`\n${items.length} items. Restore with:\n`)
+      console.log("  pcloud restore-trash <ID> [--to /somewhere]\n")
     } catch (error) {
       handleError(error)
     }
@@ -789,7 +801,7 @@ program
   .command("restore-trash")
   .description("Restore a file or folder from trash by ID")
   .argument("<id>", "File ID, or folder ID with --folder")
-  .option("--folder", "Treat the ID as a folder, restoring its whole tree")
+  .option("--folder", "Force folder handling (detected automatically for trash-root items)")
   .option(
     "--to <path>",
     "Restore into this folder instead of the original location",
@@ -814,7 +826,19 @@ program
       }
 
       const numeric = parseInt(id, 10)
-      const response = options.folder
+
+      // Trash knows whether an id is a folder, so the user should not have to.
+      // --folder stays as an override for an id that is not at the trash root.
+      let isFolder = Boolean(options.folder)
+      if (!options.folder) {
+        const trash = await api.listTrash()
+        const entry = (trash.contents ?? []).find(
+          (item: any) => item.folderid === numeric || item.fileid === numeric,
+        ) as { folderid?: number } | undefined
+        isFolder = entry?.folderid === numeric
+      }
+
+      const response = isFolder
         ? await api.restoreFolderFromTrash(numeric, { restoreTo })
         : await api.restoreFromTrash(numeric, { restoreTo })
 
