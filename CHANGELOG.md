@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-08-01
+
+### Added
+
+- **A Shares tab in the browser**, listing what you have shared out and what has been shared with you, with the share id that `remove-share` takes. Enter on an outgoing share offers to revoke it, behind a confirmation naming the recipient. Incoming shares offer nothing: leaving one is `declineshare`, on a request id that no longer exists once accepted.
+- **Shared folders are marked in the file list** — `→ shared` for ones you granted, `← shared` for ones you were given. A share is a property of a folder rather than a place, so a tab alone would have left the file list silent about it. The direction is an arrow rather than a colour, since which way access runs is the whole point.
+- **Upload with `u`**, into the folder you are already looking at. A GUI makes Upload a destination because there is nowhere else to drop; here the cursor has already answered that, so the prompt asks for a local path and nothing else. Also available from the enter menu.
+
+[0.16.0]: https://github.com/kud/pcloud-cli/compare/v0.15.1...v0.16.0
+
 ## [0.15.1] - 2026-07-31
 
 ### Fixed
