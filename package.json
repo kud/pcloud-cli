@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "@kud/pcloud": "0.3.0",
-    "@kud/pcloud-ink": "0.2.1",
+    "@kud/pcloud-ink": "0.3.0",
     "commander": "14.0.3",
     "dotenv": "17.4.2",
     "ink": "7.0.1",
