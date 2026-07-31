@@ -18,6 +18,7 @@ import {
 } from "@kud/pcloud"
 import { renderAccount, renderChanges, renderFileList } from "./render.js"
 import { planRewind, applyRewind } from "./rewind.js"
+import { pathResolver } from "./lib/paths.js"
 
 dotenv.config({ quiet: true })
 
@@ -843,6 +844,7 @@ program
   .option("--deleted", "Only deletions")
   .option("--event <type...>", "Filter by event type (e.g. deletefile)")
   .option("--summary", "Group counts by minute and by event type")
+  .option("--paths", "Resolve full paths (one lookup per distinct folder)")
   .option("--json", "Output raw JSON")
   .action(async (options) => {
     try {
@@ -869,6 +871,16 @@ program
       if (entries.length === 0) {
         console.log("No matching events")
         return
+      }
+
+      // Paths are resolved only for the table, and only when asked: it costs a
+      // listfolder per distinct parent, which a summary of counts does not need.
+      if (!options.summary && options.paths) {
+        const toPath = pathResolver(api, entries)
+        for (const entry of entries) {
+          const path = await toPath(entry)
+          if (path) entry.metadata = { ...entry.metadata, path }
+        }
       }
 
       if (options.summary) {

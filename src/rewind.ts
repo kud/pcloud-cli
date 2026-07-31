@@ -1,4 +1,5 @@
 import type { PCloudAPI, PCloudDiffEntry } from "@kud/pcloud"
+import { pathResolver } from "./lib/paths.js"
 
 // pCloud has no Rewind endpoint — the web app's feature is not in the public
 // API under any spelling. What it does have are the three pieces Rewind is
@@ -17,40 +18,6 @@ export type RewindPlan = {
   scanned: number
 }
 
-// diff metadata carries parentfolderid but never a path, so a folder's name is
-// all an event gives us. Walking parents up to the root turns that into
-// something a person can recognise — and the cache matters because a bulk
-// deletion produces hundreds of events sharing a handful of parents.
-export const pathResolver = (api: PCloudAPI) => {
-  const cache = new Map<number, string>([[0, ""]])
-
-  const folderPath = async (folderid?: number): Promise<string> => {
-    if (folderid === undefined) return ""
-    const hit = cache.get(folderid)
-    if (hit !== undefined) return hit
-
-    try {
-      const res = await api.listFolderById(folderid, { nofiles: true })
-      const meta = res.metadata as
-        { name?: string; parentfolderid?: number } | undefined
-      if (!meta?.name) return ""
-      const parent = await folderPath(meta.parentfolderid)
-      const full = `${parent}/${meta.name}`
-      cache.set(folderid, full)
-      return full
-    } catch {
-      return ""
-    }
-  }
-
-  return async (entry: PCloudDiffEntry): Promise<string> => {
-    const meta = entry.metadata ?? {}
-    if (meta.path) return meta.path
-    const parent = await folderPath(meta.parentfolderid)
-    return `${parent}/${meta.name ?? "?"}`
-  }
-}
-
 // A deletion is undone by restoring, a modification by reverting. A creation
 // cannot be undone without deleting real data, so it is reported and never
 // acted on — the asymmetry is deliberate, since a rewind that quietly removed
@@ -62,18 +29,37 @@ const classify = (event: string): RewindAction["kind"] | null => {
   return null
 }
 
+// diff's `after` parameter does not parse ISO-8601 — handed one, pCloud returns
+// a window that is not the one requested, with no error. Fetching a block of
+// recent events and filtering here keeps the cutoff exact and the timezone
+// handling ours, at the cost of pulling more than strictly needed.
+const SCAN_LIMIT = 5000
+
 export const planRewind = async (
   api: PCloudAPI,
   since: Date,
   pathPrefix?: string,
 ): Promise<RewindPlan> => {
-  const response = await api.diff({ after: since.toISOString() })
+  const response = await api.diff({ last: SCAN_LIMIT })
   if (response.result !== 0) {
     throw new Error(response.error ?? "could not read change history")
   }
 
-  const entries = response.entries ?? []
-  const toPath = pathResolver(api)
+  const fetched = response.entries ?? []
+  const entries = fetched.filter(
+    (entry) => new Date(entry.time ?? 0).getTime() >= since.getTime(),
+  )
+
+  // A full block means older events were cut off, and a rewind that silently
+  // ignored part of its own window would be worse than one that refuses.
+  if (fetched.length >= SCAN_LIMIT && entries.length === fetched.length) {
+    throw new Error(
+      `That reaches past the ${SCAN_LIMIT} most recent events — history before ` +
+        `${new Date(fetched[0]?.time ?? "").toLocaleString()} was not scanned. ` +
+        `Choose a later time.`,
+    )
+  }
+  const toPath = pathResolver(api, entries)
   const actions: RewindAction[] = []
 
   for (const entry of entries) {
