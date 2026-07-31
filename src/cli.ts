@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, existsSync } from "fs"
+import { homedir } from "os"
 import { basename } from "path"
 import readline from "readline"
 import { Writable } from "stream"
@@ -21,6 +22,20 @@ import { renderAccount, renderChanges, renderFileList } from "./render.js"
 import { planRewind, applyRewind } from "./rewind.js"
 import { pathResolver } from "./lib/paths.js"
 import { checkAll } from "./lib/health.js"
+import {
+  PCLOUD_DB,
+  applyPrune,
+  daemonRunning,
+  databaseLocked,
+  planPrune,
+  readPairs,
+  snapshot,
+  strandedTasks,
+  tableCounts,
+  unlistedTables,
+  verdicts,
+  type SyncPair,
+} from "./lib/sync.js"
 
 dotenv.config({ quiet: true })
 
@@ -801,7 +816,10 @@ program
   .command("restore-trash")
   .description("Restore a file or folder from trash by ID")
   .argument("<id>", "File ID, or folder ID with --folder")
-  .option("--folder", "Force folder handling (detected automatically for trash-root items)")
+  .option(
+    "--folder",
+    "Force folder handling (detected automatically for trash-root items)",
+  )
   .option(
     "--to <path>",
     "Restore into this folder instead of the original location",
@@ -1053,6 +1071,268 @@ const HEALTH_GLYPH: Record<string, string> = {
   missing: "🔥",
 }
 
+const shortenHome = (path: string): string =>
+  path.startsWith(homedir()) ? `~${path.slice(homedir().length)}` : path
+
+const CRITICAL = new Set(["orphaned", "remote-missing", "stuck"])
+
+const pairGlyph = (pair: SyncPair): string =>
+  pair.issues.length === 0
+    ? "✓"
+    : pair.issues.some((issue) => CRITICAL.has(issue.kind))
+      ? "🔥"
+      : "🌶️"
+
+// A tick occupies one terminal cell where the emoji glyphs occupy two, so it is
+// padded to match. Without this every healthy row's columns sit one cell to the
+// left of the unhealthy ones, which is worst exactly when a table is being
+// scanned for the odd row out.
+const glyphCell = (glyph: string): string =>
+  glyph === "✓" ? `${glyph} ` : glyph
+
+const REMOTE_NONE = "— orphaned"
+
+const renderPairs = (pairs: SyncPair[]): void => {
+  const localCol =
+    Math.max(5, ...pairs.map((p) => shortenHome(p.localpath).length)) + 2
+  const remoteCol =
+    Math.max(6, ...pairs.map((p) => (p.remotepath ?? REMOTE_NONE).length)) + 2
+
+  console.log(
+    `   ${padEnd("Local", localCol)}${padEnd("Remote", remoteCol)}${padEnd("Files", 8)}Queue`,
+  )
+
+  pairs.forEach((pair) =>
+    console.log(
+      `${glyphCell(pairGlyph(pair))} ${padEnd(shortenHome(pair.localpath), localCol)}${padEnd(pair.remotepath ?? REMOTE_NONE, remoteCol)}${padEnd(String(pair.files || "–"), 8)}${pair.queued || "–"}`,
+    ),
+  )
+
+  const unhealthy = pairs.filter((pair) => pair.issues.length > 0)
+  if (unhealthy.length === 0) {
+    console.log("\nAll sync pairs healthy.\n")
+    return
+  }
+
+  console.log()
+  unhealthy.forEach((pair) => {
+    console.log(
+      `${pairGlyph(pair)} #${pair.id}  ${shortenHome(pair.localpath)}`,
+    )
+    pair.issues.forEach((issue) => console.log(`   ${issue.detail}`))
+    if (pair.issues.some((issue) => issue.kind === "orphaned"))
+      console.log(`   → pcloud sync prune ${pair.id}`)
+    console.log()
+  })
+}
+
+const renderPairDetail = (
+  db: ReturnType<typeof snapshot>["db"],
+  pair: SyncPair,
+): void => {
+  console.log(`\nSync pair #${pair.id}\n`)
+  console.log(`  Local     ${shortenHome(pair.localpath)}`)
+  console.log(`  Remote    ${pair.remotepath ?? REMOTE_NONE}`)
+  console.log(`  Folder id ${pair.folderid ?? "— none"}`)
+  console.log(`  Indexed   ${pair.folders} folders, ${pair.files} files`)
+  console.log(`  Queue     ${pair.queued} task(s)`)
+
+  const stranded = strandedTasks(db, pair.id)
+  if (stranded.length) {
+    console.log("\n  Queued with no destination:")
+    stranded.forEach((task) =>
+      console.log(`    ${task.name ?? "?"}  (type ${task.type})`),
+    )
+  }
+
+  if (pair.issues.length === 0) {
+    console.log("\n  Healthy.\n")
+    return
+  }
+
+  console.log()
+  pair.issues.forEach((issue) =>
+    console.log(`  ${issue.kind.padEnd(16)}${issue.detail}`),
+  )
+  console.log()
+}
+
+const renderDebug = (snap: ReturnType<typeof snapshot>): void => {
+  console.log(
+    "\npCloud Drive   " + (daemonRunning() ? "running" : "not running"),
+  )
+  console.log(`Database       ${shortenHome(snap.source)}`)
+  console.log(
+    `               ${formatBytes(snap.bytes)} · WAL ${snap.hadWal ? "present (snapshot replayed it)" : "checkpointed"}`,
+  )
+
+  const counts = tableCounts(snap.db)
+  const width = Math.max(...counts.map((row) => row.table.length)) + 2
+  console.log(
+    "\nTable counts (allowlisted — credential and crypto tables are never read):\n",
+  )
+  counts.forEach((row) =>
+    console.log(`  ${padEnd(row.table, width)}${row.rows}`),
+  )
+
+  const unlisted = unlistedTables(snap.db)
+  if (unlisted.length)
+    console.log(`\nNot shown (${unlisted.length}): ${unlisted.join(", ")}`)
+  console.log()
+}
+
+const reportLocalDaemon = (dbPath: string): void => {
+  console.log("\nLocal daemon")
+
+  if (!existsSync(dbPath)) {
+    console.log("  no database found — pCloud Drive is not installed here\n")
+    return
+  }
+
+  const snap = snapshot(dbPath)
+  try {
+    const pairs = readPairs(snap.db)
+    const problems = verdicts(pairs)
+
+    console.log(
+      `  ${pairs.length} sync pair(s) · pCloud Drive ${daemonRunning() ? "running" : "not running"}`,
+    )
+    if (problems.length === 0) {
+      console.log("✓ no local sync faults\n")
+      return
+    }
+
+    problems.forEach((verdict) =>
+      console.log(
+        `${CRITICAL.has(verdict.kind) ? "🔥" : "🌶️"} ${verdict.count} ${verdict.detail}`,
+      ),
+    )
+    console.log("\n  Detail: pcloud sync\n")
+  } finally {
+    snap.close()
+  }
+}
+
+const sync = program
+  .command("sync")
+  .description("Inspect the local pCloud Drive sync daemon")
+
+sync
+  .command("status", { isDefault: true })
+  .description("Show local sync pairs and their health")
+  .argument("[id]", "Show detail for a single sync pair")
+  .option("--json", "Output raw JSON")
+  .option("--debug", "Show daemon state, table counts and schema anomalies")
+  .option("--db <path>", "Read a different database file", PCLOUD_DB)
+  .action((id: string | undefined, options) => {
+    try {
+      const snap = snapshot(options.db)
+      try {
+        if (options.debug && !id) {
+          renderDebug(snap)
+          return
+        }
+
+        const pairs = readPairs(snap.db)
+
+        if (options.json) {
+          console.log(
+            JSON.stringify(
+              id
+                ? (pairs.find((pair) => pair.id === parseInt(id, 10)) ?? null)
+                : pairs,
+              null,
+              2,
+            ),
+          )
+          return
+        }
+
+        if (id) {
+          const pair = pairs.find((p) => p.id === parseInt(id, 10))
+          if (!pair) {
+            console.error(`Error: no sync pair with id ${id}`)
+            process.exit(1)
+          }
+          renderPairDetail(snap.db, pair)
+          return
+        }
+
+        console.log(
+          `\npCloud Drive   ${daemonRunning() ? "running" : "not running"}`,
+        )
+        console.log(
+          `Database       ${shortenHome(snap.source)} · ${formatBytes(snap.bytes)}\n`,
+        )
+        renderPairs(pairs)
+      } finally {
+        snap.close()
+      }
+    } catch (error) {
+      handleError(error)
+    }
+  })
+
+sync
+  .command("prune")
+  .description("Remove an orphaned sync pair and its local index")
+  .argument("<id>", "Sync pair id (from `pcloud sync`)")
+  .option("--apply", "Perform the deletion (default is a dry run)")
+  .option("--db <path>", "Operate on a different database file", PCLOUD_DB)
+  .action((id: string, options) => {
+    try {
+      const syncid = parseInt(id, 10)
+      const snap = snapshot(options.db)
+      const plan = (() => {
+        try {
+          return planPrune(snap.db, syncid)
+        } finally {
+          snap.close()
+        }
+      })()
+
+      console.log(`\nSync pair #${syncid}`)
+      console.log(`  Local     ${shortenHome(plan.pair.localpath)}`)
+      console.log(`  Remote    ${plan.pair.remotepath ?? REMOTE_NONE}\n`)
+
+      if (plan.pair.issues.length === 0) {
+        console.log(
+          "This pair is healthy — pruning it would unlink a working sync.",
+        )
+        console.log("Remove it from pCloud Drive's preferences instead.\n")
+        process.exit(1)
+      }
+
+      console.log("Rows to delete:")
+      Object.entries(plan.counts).forEach(([table, n]) =>
+        console.log(`  ${padEnd(table, 16)}${n}`),
+      )
+      console.log(`  ${padEnd("total", 16)}${plan.total}\n`)
+
+      if (!options.apply) {
+        console.log("This was a dry run. Re-run with --apply to perform it.\n")
+        return
+      }
+
+      // The daemon keeps its own picture of the sync set in memory and writes it
+      // back, so deleting underneath a running pCloud Drive either loses the edit
+      // or corrupts the WAL. Both checks are kept: the process may have exited
+      // while still holding the file, and the file may be held by something else.
+      if (daemonRunning() || databaseLocked(options.db)) {
+        console.error("Error: pCloud Drive is running and holds this database.")
+        console.error("Quit pCloud Drive, then run this again.\n")
+        process.exit(1)
+      }
+
+      const { backup, removed } = applyPrune(options.db, syncid)
+      console.log(`✓ Removed ${removed} rows for sync pair #${syncid}`)
+      console.log(`  Backup: ${shortenHome(backup)}`)
+      console.log("  Start pCloud Drive again to confirm the error is gone.\n")
+    } catch (error) {
+      handleError(error)
+    }
+  })
+
 program
   .command("download")
   .description("Download a file to the local filesystem")
@@ -1124,9 +1404,10 @@ program
 program
   .command("doctor")
   .description(
-    "Check which commands your current credential can actually reach",
+    "Check which commands your credential can reach, and the local sync daemon",
   )
-  .action(async () => {
+  .option("--db <path>", "Read a different local database", PCLOUD_DB)
+  .action(async (options) => {
     try {
       const stored = tokenStore.load()
       const envAuth = process.env.PCLOUD_AUTH
@@ -1139,8 +1420,12 @@ program
           ? { access_token: accessToken }
           : null
 
+      // The local half of doctor needs no credential, and a broken sync pair is
+      // exactly the kind of fault someone hits before getting round to logging
+      // in — so it still runs, and only the remote half is given up on.
       if (!auth) {
         console.error("Not authenticated. Run `pcloud login` first.")
+        reportLocalDaemon(options.db)
         process.exit(1)
       }
 
@@ -1179,7 +1464,10 @@ program
           `${missing.length} command(s) call endpoints pCloud does not expose.\nFor Rewind, use \`pcloud rewind\` instead.\n`,
         )
       }
-      if (!blocked.length && !missing.length) console.log("\nAll reachable.\n")
+      if (!blocked.length && !missing.length)
+        console.log("\nAll endpoints reachable.")
+
+      reportLocalDaemon(options.db)
     } catch (error) {
       handleError(error)
     }
