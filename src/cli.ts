@@ -17,6 +17,7 @@ import {
   resolveAuth,
 } from "@kud/pcloud"
 import { renderAccount, renderChanges, renderFileList } from "./render.js"
+import { planRewind, applyRewind } from "./rewind.js"
 
 dotenv.config({ quiet: true })
 
@@ -808,16 +809,14 @@ program
 // Kept as signposts so the command name leads somewhere useful instead of
 // failing with a bare HTTP 404.
 const rewindUnavailable = (): never => {
-  console.error("Rewind is not available through the pCloud API.\n")
-  console.error("It exists only in the pCloud web app, at pcloud.com.\n")
-  console.error("From here, the closest equivalents are:")
-  console.error(
-    "  pcloud changes         see what was created, changed or deleted, and when",
-  )
-  console.error(
-    "  pcloud list-revisions  list previous versions of a single file",
-  )
-  console.error("  pcloud list-trash      list recoverable deleted files\n")
+  console.error("pCloud's Rewind feature has no public API.\n")
+  console.error("Use `pcloud rewind` instead — it reconstructs the same thing")
+  console.error("from change history, file revisions and trash:\n")
+  console.error('  pcloud rewind --to "2026-07-30 20:30" --path /Projects\n')
+  console.error("Related:")
+  console.error("  pcloud changes         what changed, and when")
+  console.error("  pcloud list-revisions  previous versions of a single file")
+  console.error("  pcloud list-trash      recoverable deleted files\n")
   process.exit(1)
 }
 
@@ -879,6 +878,104 @@ program
 
       renderChanges(entries)
       console.log(`\n${entries.length} events`)
+    } catch (error) {
+      handleError(error)
+    }
+  })
+
+program
+  .command("rewind")
+  .description(
+    "Undo changes made since a point in time — restores deletions, reverts edits",
+  )
+  .requiredOption(
+    "--to <datetime>",
+    'Point to rewind to (e.g. "2026-07-30 20:30")',
+  )
+  .option("--path <prefix>", "Only act on paths under this prefix")
+  .option("--apply", "Actually perform the plan (default is a dry run)")
+  .option("-y, --yes", "Skip the confirmation prompt")
+  .action(async (options) => {
+    try {
+      const since = new Date(options.to)
+      if (Number.isNaN(since.getTime())) {
+        console.error(`Error: could not read "${options.to}" as a date`)
+        process.exit(1)
+      }
+
+      const api = await getAuthenticatedAPI()
+      const plan = await planRewind(api, since, options.path)
+
+      const restores = plan.actions.filter((a) => a.kind === "restore")
+      const reverts = plan.actions.filter((a) => a.kind === "revert")
+      const created = plan.actions.filter((a) => a.kind === "created")
+
+      console.log(
+        `\nRewinding to ${since.toLocaleString()}${options.path ? ` under ${options.path}` : ""}`,
+      )
+      console.log(`Scanned ${plan.scanned} events.\n`)
+
+      const show = (label: string, actions: typeof plan.actions) => {
+        if (!actions.length) return
+        console.log(`${label} (${actions.length}):`)
+        actions
+          .slice(0, 20)
+          .forEach((a) => console.log(`  ${a.path || a.name}`))
+        if (actions.length > 20)
+          console.log(`  … and ${actions.length - 20} more`)
+        console.log()
+      }
+
+      show("Restore from trash", restores)
+      show("Revert to earlier revision", reverts)
+
+      // Undoing a creation means deleting a real file, which is the same
+      // action as the accident this command exists to repair. Reported, never
+      // performed — the user can delete them deliberately if that is the intent.
+      if (created.length) {
+        console.log(
+          `Created since then (${created.length}) — left alone, delete manually if unwanted:`,
+        )
+        created
+          .slice(0, 10)
+          .forEach((a) => console.log(`  ${a.path || a.name}`))
+        if (created.length > 10)
+          console.log(`  … and ${created.length - 10} more`)
+        console.log()
+      }
+
+      if (!restores.length && !reverts.length) {
+        console.log("Nothing to undo.\n")
+        return
+      }
+
+      if (!options.apply) {
+        console.log("This was a dry run. Re-run with --apply to perform it.\n")
+        return
+      }
+
+      if (!options.yes) {
+        const answer = await ask(
+          `Apply ${restores.length + reverts.length} changes? (yes/no) `,
+        )
+        if (answer.toLowerCase() !== "yes") {
+          console.log("Cancelled.\n")
+          return
+        }
+      }
+
+      const outcomes = await applyRewind(api, plan)
+      const failed = outcomes.filter((o) => !o.ok)
+
+      outcomes
+        .filter((o) => o.ok)
+        .forEach((o) => console.log(`✓ ${o.action.path} — ${o.detail}`))
+      failed.forEach((o) => console.error(`✗ ${o.action.path} — ${o.detail}`))
+
+      console.log(
+        `\n${outcomes.length - failed.length} succeeded, ${failed.length} failed.\n`,
+      )
+      if (failed.length) process.exit(1)
     } catch (error) {
       handleError(error)
     }
