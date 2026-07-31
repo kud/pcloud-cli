@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-07-31
+
+### Added
+
+- **New action: "Open a copy in the default app".** `pcloud browse` could already open a file, but only by handing the pCloud download link to your browser — which for an image means a tab, not an image viewer. The new action downloads a copy and gives it to the OS, so a PNG opens in Preview and a PDF opens wherever you read PDFs. The old behaviour is still there as "Open in browser".
+- Every action row now carries a one-line explanation under the cursor. "Rewind everything to just before this" did not say _when_ "this" was or how far "everything" reached; it now reads "Rewind the whole account to 31 Jul 2026 13:20:29" with "Undoes this change and every deletion or edit after it. You will see the counts before anything moves."
+
+### Fixed
+
+- Image previews no longer paint over the preview panel's border. The panel's inner width was being recomputed by hand — 45% of the terminal, less borders, less padding — and a native-protocol image is positioned in pixels rather than laid out in cells, so a guess one column too wide spilled straight through the frame. The image is now fitted to the measured box and no size is passed at all.
+
+[0.10.0]: https://github.com/kud/pcloud-cli/compare/v0.9.0...v0.10.0
+
 ## [0.9.0] - 2026-07-31
 
 ### Added
