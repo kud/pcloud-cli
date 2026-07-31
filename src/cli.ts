@@ -17,6 +17,7 @@ import {
   OAuthFlow,
   sessionLogin,
   resolveAuth,
+  resolveStoredAuth,
 } from "@kud/pcloud"
 import { renderAccount, renderChanges, renderFileList } from "./render.js"
 import { planRewind, applyRewind } from "./rewind.js"
@@ -56,17 +57,29 @@ program
   .description("CLI tool for pCloud file operations")
   .version(pkg.version)
 
+const exitNotAuthenticated = (): never => {
+  console.error("\n❌ Not authenticated!\n")
+  console.error("It looks like you haven't set up pCloud CLI yet.\n")
+  console.error("Please run this command first:\n")
+  console.error("  pcloud login\n")
+  console.error("This is a one-time setup that takes less than a minute.\n")
+  process.exit(1)
+}
+
 const getAuthenticatedAPI = async (): Promise<PCloudAPI> => {
   try {
     return await resolveAuth({ defaultApiServer })
   } catch {
-    console.error("\n❌ Not authenticated!\n")
-    console.error("It looks like you haven't set up pCloud CLI yet.\n")
-    console.error("Please run this command first:\n")
-    console.error("  pcloud login\n")
-    console.error("This is a one-time setup that takes less than a minute.\n")
-    process.exit(1)
+    return exitNotAuthenticated()
   }
+}
+
+// resolveStoredAuth rather than resolveAuth: the latter falls through to an
+// interactive OAuth browser round-trip when PCLOUD_CLIENT_ID and _SECRET are set,
+// which is the wrong thing to trigger from a precondition check. This only asks
+// whether a credential is already on hand.
+const requireStoredAuth = (): void => {
+  if (!resolveStoredAuth({ defaultApiServer })) exitNotAuthenticated()
 }
 
 const handleError = (error: unknown): never => {
@@ -1477,6 +1490,11 @@ program
   .command("browse")
   .description("Interactive file browser")
   .action(async () => {
+    // Checked here rather than left to the browser component: that check runs
+    // inside the render, by which point the alternate screen is up, so its error
+    // is written to a buffer torn down microseconds later and the command appears
+    // to exit silently. The message only survives if it precedes the switch.
+    requireStoredAuth()
     const { startBrowse } = await import("./browse.js")
     await startBrowse()
   })
