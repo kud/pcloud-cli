@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync } from "fs"
+import { readFileSync, writeFileSync, existsSync } from "fs"
+import { basename } from "path"
 import readline from "readline"
 import { Writable } from "stream"
 import { Command } from "commander"
@@ -19,6 +20,7 @@ import {
 import { renderAccount, renderChanges, renderFileList } from "./render.js"
 import { planRewind, applyRewind } from "./rewind.js"
 import { pathResolver } from "./lib/paths.js"
+import { checkAll } from "./lib/health.js"
 
 dotenv.config({ quiet: true })
 
@@ -1015,6 +1017,145 @@ program
         `\n${outcomes.length - failed.length} succeeded, ${failed.length} failed.\n`,
       )
       if (failed.length) process.exit(1)
+    } catch (error) {
+      handleError(error)
+    }
+  })
+
+const HEALTH_GLYPH: Record<string, string> = {
+  ok: "✓",
+  "needs-session": "🌶️",
+  "no-permission": "🌶️",
+  missing: "🔥",
+}
+
+program
+  .command("download")
+  .description("Download a file to the local filesystem")
+  .argument("<path>", "Remote file path (e.g. /notes.md)")
+  .argument("[dest]", "Local destination (defaults to the file's own name)")
+  .action(async (path: string, dest: string | undefined) => {
+    try {
+      const api = await getAuthenticatedAPI()
+      const stat = await api.stat(path)
+      assertSuccess(stat.result, stat.error)
+
+      const meta = stat.metadata as
+        { fileid?: number; name?: string; isfolder?: boolean } | undefined
+      if (!meta?.fileid || meta.isfolder) {
+        console.error(`Error: not a file: ${path}`)
+        process.exit(1)
+      }
+
+      const target = dest ?? meta.name ?? "download"
+      // Refusing rather than overwriting: a download that silently replaced a
+      // local file would be a poor trade for saving one flag.
+      if (existsSync(target)) {
+        console.error(`Error: ${target} already exists`)
+        process.exit(1)
+      }
+
+      const data = await api.downloadFile(meta.fileid)
+      writeFileSync(target, Buffer.from(data))
+      console.log(`✓ ${path} → ${target} (${formatBytes(data.byteLength)})`)
+    } catch (error) {
+      handleError(error)
+    }
+  })
+
+program
+  .command("upload")
+  .description("Upload a local file to a pCloud folder")
+  .argument("<local>", "Local file to upload")
+  .argument("<folder>", "Remote folder path (e.g. /Documents)")
+  .action(async (local: string, folder: string) => {
+    try {
+      if (!existsSync(local)) {
+        console.error(`Error: no such file: ${local}`)
+        process.exit(1)
+      }
+
+      const api = await getAuthenticatedAPI()
+      const stat = await api.stat(folder)
+      const folderid = (stat.metadata as { folderid?: number } | undefined)
+        ?.folderid
+      if (stat.result !== 0 || folderid === undefined) {
+        console.error(`Error: no such folder: ${folder}`)
+        process.exit(1)
+      }
+
+      const contents = readFileSync(local)
+      const name = basename(local)
+      const response = await api.uploadFile(folderid, name, contents)
+      assertSuccess(response.result, response.error)
+
+      console.log(
+        `✓ ${local} → ${folder}/${name} (${formatBytes(contents.byteLength)})`,
+      )
+    } catch (error) {
+      handleError(error)
+    }
+  })
+
+program
+  .command("doctor")
+  .description(
+    "Check which commands your current credential can actually reach",
+  )
+  .action(async () => {
+    try {
+      const stored = tokenStore.load()
+      const envAuth = process.env.PCLOUD_AUTH
+      const envToken = process.env.PCLOUD_ACCESS_TOKEN
+      const sessionToken = envAuth ?? stored?.auth
+      const accessToken = envToken ?? stored?.access_token
+      const auth: Record<string, string> | null = sessionToken
+        ? { auth: sessionToken }
+        : accessToken
+          ? { access_token: accessToken }
+          : null
+
+      if (!auth) {
+        console.error("Not authenticated. Run `pcloud login` first.")
+        process.exit(1)
+      }
+
+      const tier = "auth" in auth ? "session token" : "OAuth access token"
+      console.log(`\nCredential: ${tier}`)
+      if (stored?.expiresAt) {
+        const left = Math.round(
+          (stored.expiresAt - Date.now()) / (24 * 60 * 60 * 1000),
+        )
+        console.log(
+          `Expires:    ${new Date(stored.expiresAt).toLocaleString()} (${left} days)`,
+        )
+      }
+      console.log()
+
+      const api = await getAuthenticatedAPI()
+      const results = await checkAll(api, auth)
+
+      const width = Math.max(...results.map((r) => r.command.length))
+      results.forEach((r) =>
+        console.log(
+          `${HEALTH_GLYPH[r.health]} ${padEnd(r.command, width + 2)}${r.detail}`,
+        ),
+      )
+
+      const blocked = results.filter((r) => r.health === "needs-session")
+      const missing = results.filter((r) => r.health === "missing")
+
+      if (blocked.length) {
+        console.log(
+          `\n${blocked.length} command(s) need a session token — run:\n\n  pcloud login --session\n`,
+        )
+      }
+      if (missing.length) {
+        console.log(
+          `${missing.length} command(s) call endpoints pCloud does not expose.\nFor Rewind, use \`pcloud rewind\` instead.\n`,
+        )
+      }
+      if (!blocked.length && !missing.length) console.log("\nAll reachable.\n")
     } catch (error) {
       handleError(error)
     }
