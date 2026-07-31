@@ -27,8 +27,11 @@ import {
   renderAccount,
   renderChanges,
   renderFileList,
+  renderPublinks,
+  renderRevisions,
   renderShares,
   renderTable,
+  renderTrash,
 } from "./render.js"
 import { checkAll } from "./lib/health.js"
 import {
@@ -527,24 +530,7 @@ program
       const response = await api.listRevisions(parseInt(fileid, 10))
       assertSuccess(response.result, response.error)
 
-      if (!response.revisions || response.revisions.length === 0) {
-        console.log("No revisions found")
-        return
-      }
-
-      const idCol = 14
-      const sizeCol = 14
-
-      console.log(
-        `${padEnd("Revision ID", idCol)}${padEnd("Size", sizeCol)}Modified`,
-      )
-      console.log("-".repeat(idCol + sizeCol + 20))
-
-      response.revisions.forEach((rev: PCloudRevision) => {
-        console.log(
-          `${padEnd(String(rev.revisionid), idCol)}${padEnd(formatBytes(rev.size), sizeCol)}${rev.modified ?? "-"}`,
-        )
-      })
+      renderRevisions(response.revisions ?? [])
     } catch (error) {
       handleError(error)
     }
@@ -580,11 +566,10 @@ program
 
       const shares = response.shares ?? {}
       const requests = response.requests ?? {}
-      const sections: [string, "outgoing" | "incoming", PCloudShareItem[]][] =
-        [
-          ["Shared with others", "outgoing", shares.outgoing ?? []],
-          ["Shared with you", "incoming", shares.incoming ?? []],
-        ]
+      const sections: [string, "outgoing" | "incoming", PCloudShareItem[]][] = [
+        ["Shared with others", "outgoing", shares.outgoing ?? []],
+        ["Shared with you", "incoming", shares.incoming ?? []],
+      ]
       const pending: [string, PCloudShareRequest[]][] = [
         ["Requests you sent", requests.outgoing ?? []],
         ["Requests awaiting you", requests.incoming ?? []],
@@ -756,29 +741,7 @@ program
       const response = await api.listPublinks()
       assertSuccess(response.result, response.error)
 
-      if (!response.publinks || response.publinks.length === 0) {
-        console.log("No public links found")
-        return
-      }
-
-      const codeCol = 20
-      const nameCol = 36
-      const dlCol = 12
-
-      console.log(
-        `${padEnd("Code", codeCol)}${padEnd("Name", nameCol)}${padEnd("Downloads", dlCol)}Expires`,
-      )
-      console.log("-".repeat(codeCol + nameCol + dlCol + 20))
-
-      response.publinks.forEach((link: PCloudPublink) => {
-        const downloads =
-          link.maxdownloads !== undefined
-            ? `${link.downloads ?? 0}/${link.maxdownloads}`
-            : String(link.downloads ?? 0)
-        console.log(
-          `${padEnd(link.code, codeCol)}${padEnd(link.name ?? "-", nameCol)}${padEnd(downloads, dlCol)}${link.expire ?? "-"}`,
-        )
-      })
+      renderPublinks(response.publinks ?? [])
     } catch (error) {
       handleError(error)
     }
@@ -851,35 +814,10 @@ program
         return
       }
 
-      const idCol = 14
-      const nameCol = 44
-
       // Printing fileid alone left every folder showing "-", and trash is
       // mostly folders — so the id needed to restore something was exactly the
-      // one the listing would not show.
-      console.log(
-        `${padEnd("Kind", 6)}${padEnd("ID", idCol)}${padEnd("Name", nameCol)}${padEnd("Size", 12)}Deleted`,
-      )
-      console.log("-".repeat(6 + idCol + nameCol + 12 + 20))
-
-      items.forEach((item: any) => {
-        const isFolder = item.folderid !== undefined
-        const deleted = item.deletetime
-          ? new Date(item.deletetime * 1000)
-              .toISOString()
-              .slice(0, 16)
-              .replace("T", " ")
-          : "-"
-        console.log(
-          [
-            padEnd(isFolder ? "dir" : "file", 6),
-            padEnd(String(item.folderid ?? item.fileid ?? "-"), idCol),
-            padEnd(item.name ?? "-", nameCol),
-            padEnd(isFolder ? "-" : formatBytes(item.size ?? 0), 12),
-            deleted,
-          ].join(""),
-        )
-      })
+      // one the listing would not show. TrashList picks whichever exists.
+      renderTrash(items)
 
       console.log(`\n${items.length} items. Restore with:\n`)
       console.log("  pcloud restore-trash <ID> [--to /somewhere]\n")
@@ -1562,4 +1500,16 @@ program
     await startBrowse()
   })
 
-program.parse()
+// Bare `pcloud` opens the browser, the way k9s, lazygit and btop do: once a
+// tool has a full interface, that interface is the tool and needs no verb.
+// `--help` and every subcommand are untouched, so nothing scripted changes —
+// only the case that previously printed usage and did nothing useful.
+const invokedBare = process.argv.length <= 2
+
+if (invokedBare) {
+  requireStoredAuth()
+  const { startBrowse } = await import("./browse.js")
+  await startBrowse()
+} else {
+  program.parse()
+}

@@ -4,14 +4,20 @@ import {
   AccountPanel,
   ChangesList,
   FileList,
+  PublinkList,
+  RevisionList,
   ShareList,
+  TrashList,
   sortItems,
 } from "@kud/pcloud-ink"
 import { Table, colors, type Column } from "@kud/ink-ui"
 import type {
   PCloudDiffEntry,
   PCloudFolderItem,
+  PCloudPublink,
+  PCloudRevision,
   PCloudShareItem,
+  PCloudTrashItem,
   PCloudUserInfo,
 } from "@kud/pcloud"
 
@@ -65,6 +71,15 @@ export const renderShares = (
       />,
     ),
   )
+
+export const renderTrash = (items: PCloudTrashItem[]): void =>
+  once(<TrashList items={items} rows={items.length || 1} />)
+
+export const renderPublinks = (links: PCloudPublink[]): void =>
+  once(<PublinkList links={links} rows={links.length || 1} />)
+
+export const renderRevisions = (revisions: PCloudRevision[]): void =>
+  once(<RevisionList revisions={revisions} rows={revisions.length || 1} />)
 
 // Pending requests keep the generic table: they carry a different id and the
 // permissions bitmask rather than the four booleans, so folding them into

@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-07-31
+
+### Added
+
+- **`pcloud` on its own opens the browser**, the way `k9s`, `lazygit` and `btop` do — once a tool has a full interface, that interface is the tool and needs no verb. `pcloud browse` still works, `--help` still prints usage, and every subcommand is untouched, so nothing scripted changes.
+
+### Changed
+
+- `list-trash`, `list-publinks` and `list-revisions` render through components rather than hand-padded strings, so they line up with `pcloud ls` instead of reading like output from three different programs.
+- `list-revisions` orders by revision id and marks the newest as `latest`. pCloud promises no order, and taking whichever arrived first is the bug that shipped twice — once in the browser's revert, once in the CLI.
+- `list-trash` shows whichever id restores the item. Trash is mostly folders, which carry `folderid` rather than `fileid`, so the id you needed was the one the listing would not print.
+- Public links with no expiry now say `never` rather than leaving the column blank, which read as missing data on the most consequential value a link has.
+
+### Fixed
+
+- **Long names no longer run into the next column.** Every fixed-width column was built on `padEnd`, which only ever pads — a trashed file called `"8 Folders" from 30 Jul 2026 16:00.zip` is exactly 38 characters and printed as `…16:00.zip0 Bytes`, with the size welded to the name. Columns now pad _and_ truncate, and always keep a trailing gutter.
+- Image previews no longer paint over the preview panel's border. The native image protocols draw in absolute pixels rather than being laid out in cells and round their cell reservation up, so an image whose height was not an exact multiple of the cell height claimed one more row than the box gave it.
+
+[0.14.0]: https://github.com/kud/pcloud-cli/compare/v0.13.0...v0.14.0
+
 ## [0.13.0] - 2026-07-31
 
 ### Fixed
