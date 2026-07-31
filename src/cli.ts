@@ -13,6 +13,7 @@ import {
   PCloudPublink,
   PCloudRevision,
   PCloudShareItem,
+  PCloudShareRequest,
   TokenStore,
   OAuthFlow,
   sessionLogin,
@@ -20,9 +21,15 @@ import {
   resolveStoredAuth,
   planRewind,
   applyRewind,
-  pathResolver
+  pathResolver,
 } from "@kud/pcloud"
-import { renderAccount, renderChanges, renderFileList } from "./render.js"
+import {
+  renderAccount,
+  renderChanges,
+  renderFileList,
+  renderShares,
+  renderTable,
+} from "./render.js"
 import { checkAll } from "./lib/health.js"
 import {
   PCLOUD_DB,
@@ -571,25 +578,52 @@ program
       const response = await api.listShares()
       assertSuccess(response.result, response.error)
 
-      if (!response.shares || response.shares.length === 0) {
+      const shares = response.shares ?? {}
+      const requests = response.requests ?? {}
+      const sections: [string, "outgoing" | "incoming", PCloudShareItem[]][] =
+        [
+          ["Shared with others", "outgoing", shares.outgoing ?? []],
+          ["Shared with you", "incoming", shares.incoming ?? []],
+        ]
+      const pending: [string, PCloudShareRequest[]][] = [
+        ["Requests you sent", requests.outgoing ?? []],
+        ["Requests awaiting you", requests.incoming ?? []],
+      ]
+
+      const total =
+        sections.reduce((n, [, , rows]) => n + rows.length, 0) +
+        pending.reduce((n, [, rows]) => n + rows.length, 0)
+      if (total === 0) {
         console.log("No shares found")
         return
       }
 
-      const idCol = 16
-      const folderCol = 30
-      const mailCol = 30
+      for (const [title, direction, rows] of sections) {
+        if (rows.length === 0) continue
+        renderShares(rows, direction, title)
+      }
 
-      console.log(
-        `${padEnd("Request ID", idCol)}${padEnd("Folder", folderCol)}${padEnd("Recipient", mailCol)}Permissions`,
-      )
-      console.log("-".repeat(idCol + folderCol + mailCol + 12))
-
-      response.shares.forEach((share: PCloudShareItem) => {
-        console.log(
-          `${padEnd(String(share.sharerequestid ?? "-"), idCol)}${padEnd(share.foldername ?? String(share.folderid), folderCol)}${padEnd(share.mail ?? "-", mailCol)}${share.permissions ?? "-"}`,
+      // Kept separate rather than merged: these carry sharerequestid and the
+      // permissions bitmask, and it is the request id that accept and decline
+      // take. Listing them as one table is what sent `remove-share` the wrong id.
+      for (const [title, rows] of pending) {
+        if (rows.length === 0) continue
+        renderTable(
+          rows.map((req) => ({
+            id: String(req.sharerequestid ?? "-"),
+            folder: req.sharename ?? String(req.folderid),
+            address: req.mail ?? "-",
+            permissions: String(req.permissions ?? "-"),
+          })),
+          [
+            { key: "id", header: "Request ID" },
+            { key: "folder", header: "Folder" },
+            { key: "address", header: "Address" },
+            { key: "permissions", header: "Permissions" },
+          ],
+          title,
         )
-      })
+      }
     } catch (error) {
       handleError(error)
     }
@@ -653,12 +687,12 @@ program
 
 program
   .command("remove-share")
-  .description("Remove an active share")
-  .argument("<sharerequestid>", "Share request ID")
-  .action(async (sharerequestid: string) => {
+  .description("Remove an active share (see Share ID in `pcloud list-shares`)")
+  .argument("<shareid>", "Share ID of the accepted share")
+  .action(async (shareid: string) => {
     try {
       const api = await getAuthenticatedAPI()
-      const response = await api.removeShare(parseInt(sharerequestid, 10))
+      const response = await api.removeShare(parseInt(shareid, 10))
       assertSuccess(response.result, response.error)
       console.log("✓ Done")
     } catch (error) {

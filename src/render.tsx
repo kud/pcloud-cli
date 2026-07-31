@@ -1,9 +1,17 @@
 import React from "react"
-import { render } from "ink"
-import { AccountPanel, ChangesList, FileList, sortItems } from "@kud/pcloud-ink"
+import { Box, Text, render } from "ink"
+import {
+  AccountPanel,
+  ChangesList,
+  FileList,
+  ShareList,
+  sortItems,
+} from "@kud/pcloud-ink"
+import { Table, colors, type Column } from "@kud/ink-ui"
 import type {
   PCloudDiffEntry,
   PCloudFolderItem,
+  PCloudShareItem,
   PCloudUserInfo,
 } from "@kud/pcloud"
 
@@ -26,3 +34,50 @@ export const renderChanges = (entries: PCloudDiffEntry[]): void =>
 
 export const renderAccount = (user: PCloudUserInfo): void =>
   once(<AccountPanel user={user} />)
+
+// Titled section around a domain component. `list-shares` needs two of these —
+// outgoing and incoming — where `ls` needs none, which is the only reason this
+// wrapper exists rather than the command calling once() itself.
+const section = (
+  title: string,
+  node: React.ReactElement,
+): React.ReactElement => (
+  <Box flexDirection="column" marginBottom={1}>
+    <Text bold color={colors.info}>
+      {title}
+    </Text>
+    {node}
+  </Box>
+)
+
+export const renderShares = (
+  shares: PCloudShareItem[],
+  direction: "outgoing" | "incoming",
+  title: string,
+): void =>
+  once(
+    section(
+      title,
+      <ShareList
+        shares={shares}
+        direction={direction}
+        rows={shares.length || 1}
+      />,
+    ),
+  )
+
+// Pending requests keep the generic table: they carry a different id and the
+// permissions bitmask rather than the four booleans, so folding them into
+// ShareList would mean a component that renders two unrelated shapes.
+export const renderTable = <T extends Record<string, unknown>>(
+  data: T[],
+  columns: Column<T>[],
+  title?: string,
+): void =>
+  once(
+    title ? (
+      section(title, <Table data={data} columns={columns} />)
+    ) : (
+      <Table data={data} columns={columns} />
+    ),
+  )

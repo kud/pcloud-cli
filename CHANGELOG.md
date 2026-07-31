@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-07-31
+
+### Fixed
+
+- **`pcloud list-shares` worked at all.** It died with `response.shares.forEach is not a function` on every run. pCloud answers `listshares` with two objects split by direction — `{outgoing, incoming}` — while the type declared a flat array, so the call typechecked and threw at runtime.
+- **`pcloud remove-share` never removed anything.** `removeshare` ends an accepted share and takes `shareid`; `accept-share` and `decline-share` act on a pending request and take `sharerequestid`. The CLI sent the latter to all three, so pCloud answered "Please provide 'shareid'." and the removal silently did not happen. The argument is now `<shareid>`, which `list-shares` prints in its first column.
+- Test files were being compiled into `dist/`, where the runner then picked up stale copies alongside the real ones. `tsconfig.json` now excludes them from the build.
+
+### Changed
+
+- `list-shares` renders through a `ShareList` component rather than hand-padded strings, so it lines up with `pcloud ls` instead of reading like output from a different program. Active shares and pending requests are listed separately — they carry different ids, and conflating them is what sent `remove-share` the wrong one.
+- Share permissions render positionally as `rwcd`, since `rw--` and `r--d` both grant two rights and a list of the granted ones cannot tell them apart.
+
+[0.13.0]: https://github.com/kud/pcloud-cli/compare/v0.12.1...v0.13.0
+
 ## [0.12.0] - 2026-07-31
 
 ### Changed
