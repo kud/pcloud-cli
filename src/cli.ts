@@ -187,6 +187,8 @@ const runSessionLogin = async (): Promise<void> => {
   )
   console.log("and downloads. Your password is sent to pCloud over HTTPS and")
   console.log("is never written to disk — only the returned token is stored.\n")
+  console.log("Prefer not to type it here? `pcloud login --oauth` uses the")
+  console.log("browser instead, if you have an OAuth application registered.\n")
 
   const username = await ask("Email: ")
   const password = await askHidden("Password: ")
@@ -219,11 +221,24 @@ program
   .command("login")
   .description("Set up authentication with pCloud")
   .option(
-    "--session",
-    "Log in with email and password for a session token (unlocks revisions, trash, zip, downloads)",
+    "--oauth",
+    "Log in through the browser instead (requires PCLOUD_CLIENT_ID and PCLOUD_CLIENT_SECRET)",
   )
+  .option("--session", "Accepted and ignored — session login is the default")
   .action(async (options) => {
-    if (options.session) {
+    if (options.oauth && options.session) {
+      console.error(
+        "Error: --oauth and --session ask for different flows. Pick one.\n",
+      )
+      process.exit(1)
+    }
+
+    // Session is the default because it is both the cheaper and the more capable
+    // tier: it needs no registered OAuth application, and it is the only one that
+    // reaches revisions, trash, zip and downloads. OAuth's advantage — never
+    // handling the password — is real but narrow, so it earns a flag rather than
+    // the default.
+    if (!options.oauth) {
       try {
         await runSessionLogin()
         return
@@ -237,21 +252,34 @@ program
     }
 
     try {
-      console.log("\n🔐 Welcome to pCloud CLI Setup!\n")
-      console.log("You will be redirected to pCloud in your browser to log in.")
-      console.log(
-        "After logging in, you'll be redirected back automatically.\n",
-      )
-
+      // Checked before the welcome banner rather than after it. Announcing "you
+      // will be redirected to your browser" and only then discovering there is
+      // nothing to redirect with leaves the user reading an instruction the next
+      // line contradicts.
       const clientId = process.env.PCLOUD_CLIENT_ID
       const clientSecret = process.env.PCLOUD_CLIENT_SECRET
 
       if (!clientId || !clientSecret) {
         console.error(
-          "\n❌ Missing credentials. Export PCLOUD_CLIENT_ID and PCLOUD_CLIENT_SECRET in your shell or .env file.\n",
+          "\n❌ OAuth needs PCLOUD_CLIENT_ID and PCLOUD_CLIENT_SECRET.\n",
+        )
+        console.error("Register an application at")
+        console.error("  https://docs.pcloud.com/methods/oauth_2.0/")
+        console.error("then export both in your shell or a .env file.\n")
+        console.error(
+          "Or just run `pcloud login` — it needs no setup at all, and",
+        )
+        console.error(
+          "reaches revisions, trash, zip and downloads that OAuth cannot.\n",
         )
         process.exit(1)
       }
+
+      console.log("\n🔐 pCloud OAuth login\n")
+      console.log("You will be redirected to pCloud in your browser to log in.")
+      console.log(
+        "After logging in, you'll be redirected back automatically.\n",
+      )
 
       const oauth = new OAuthFlow(clientId, clientSecret, authBaseUrl)
       const tokens = await oauth.authenticate()
