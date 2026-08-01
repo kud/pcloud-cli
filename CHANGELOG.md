@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-08-01
+
+The interface is settled and documented, and the code that can destroy data is
+covered by tests. That is what the major version marks — not new features, but
+the point at which the promises are ones I am willing to keep.
+
+### Changed
+
+- **The documentation describes the CLI that exists.** The README promised _"Rewind restore — browse rewind events for any path and recover a file to an arbitrary destination"_, and `docs/rewind.mdx` documented `list-rewind` and `restore-rewind` in full. Those call `listrewindevents`, an endpoint pCloud has never exposed — `pcloud doctor` has been reporting it absent on every run. Both are gone, replaced by what `pcloud rewind` actually does.
+- New documentation pages for the browser, shares, client settings and `doctor` — roughly half the surface had none.
+- Real folder names and file counts in the sync examples replaced with generic ones.
+
+### Added
+
+- **`@kud/pcloud` is tested.** The package holding `planRewind` and `applyRewind` — the only code here that restores deletions and reverts files — had no tests at all. Twenty-seven now cover the rewind engine, path resolution and the share endpoints, where three similar-sounding operations take three different numeric ids and nothing in the type system can tell them apart. Both rewind bugs fixed in 0.9.0 lived in a second copy of that logic which had drifted from it.
+
+### Fixed
+
+- The core shipped its own test files inside `dist/`, and carried `^` ranges on its dev dependencies.
+
+[1.0.0]: https://github.com/kud/pcloud-cli/compare/v0.21.0...v1.0.0
+
+## [0.21.0] - 2026-08-01
+
+### Changed
+
+- **Every command that took a numeric id now takes a path too.** Thirteen of them — `rmdir`, `delete-file`, `get-link`, `checksum`, `list-revisions`, `revert-revision`, `copy-file`, `move-file`, `rename-file`, `share-folder`, `publink-file`, `publink-folder` and `zip` — required an opaque number you had to fetch with `pcloud stat` first, while `ls`, `stat`, `mkdir` and `download` had always taken paths. Which was which was an artefact of pCloud's id-keyed API, not a distinction anyone asked for.
+  - `pcloud rmdir /Documents/archive` now works.
+  - Bare ids are still accepted, so anything scripted keeps working. A path costs one extra call.
+  - Passing the wrong kind is refused rather than coerced: `rmdir` on a file says so instead of resolving its parent folder and recursively deleting a directory nobody named.
+
+[0.21.0]: https://github.com/kud/pcloud-cli/compare/v0.20.0...v0.21.0
+
+## [0.20.0] - 2026-08-01
+
+### Changed
+
+- **Every command prints through shared primitives**, so colour and glyph are decided in one place and always together. They are paired for accessibility rather than decoration: a green tick and a red cross are the same shape to anyone who cannot separate the hues, and colour is stripped entirely when output is piped or `NO_COLOR` is set — so the glyph and the wording carry the meaning on their own.
+- **The destructive sync commands offer to stop the daemon.** `sync prune` and `sync clear-tasks` used to error with instructions to quit pCloud Drive and run them again. They now ask, quit it, apply, and restart it — and the restart happens even if the write fails, so a command that throws never leaves your sync switched off. `--yes` skips the question for scripting.
+
+[0.20.0]: https://github.com/kud/pcloud-cli/compare/v0.19.0...v0.20.0
+
 ## [0.19.0] - 2026-08-01
 
 ### Changed
