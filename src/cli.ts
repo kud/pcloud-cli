@@ -26,12 +26,15 @@ import {
 import {
   renderAccount,
   renderChanges,
+  renderDoctor,
   renderFileList,
   renderPublinks,
   renderRevisions,
   renderShares,
   renderTable,
   renderTrash,
+  type DoctorLine,
+  type DoctorSection,
 } from "./render.js"
 import { checkAll } from "./lib/health.js"
 import {
@@ -1213,63 +1216,88 @@ const renderDebug = (snap: ReturnType<typeof snapshot>): void => {
   console.log()
 }
 
-const reportLocalDaemon = (dbPath: string): void => {
-  console.log("\nLocal daemon")
-
-  if (!existsSync(dbPath)) {
-    console.log("  no database found — pCloud Drive is not installed here\n")
-    return
+// The verdict needs the faults before the detail section prints them, and the
+// remedy differs by kind — prune unpairs a folder outright, which is right for
+// a pair pointed at a deleted remote and catastrophic for a healthy one with a
+// stuck queue. Naming the wrong command here would be worse than naming none.
+const localProblems = (dbPath: string): { detail: string; fix?: string }[] => {
+  if (!existsSync(dbPath)) return []
+  const snap = snapshot(dbPath)
+  try {
+    return readPairs(snap.db)
+      .filter((pair) => pair.issues.length > 0)
+      .map((pair) => ({
+        // Terse on purpose: the Sync section below prints the path, the remote
+        // and every issue in full. A verdict that repeats all of it truncates,
+        // and a truncated verdict is worse than a short one.
+        detail: `pair #${pair.id} · ${pair.issues.map((issue) => issue.kind).join(", ")}`,
+        fix: pair.issues.some((issue) => issue.kind === "orphaned")
+          ? `pcloud sync prune ${pair.id}`
+          : pair.issues.some((issue) => issue.kind === "stuck")
+            ? `pcloud sync clear-tasks ${pair.id}`
+            : undefined,
+      }))
+  } catch {
+    return []
+  } finally {
+    snap.close()
   }
+}
+
+// The detail section, printed under a verdict that has already named the fault
+// and its remedy. Repeating either here would make you read the same sentence
+// twice to learn nothing new — so this is only the evidence: which pair, which
+// files, and what distinguishes them from each other.
+// Returns data rather than printing it, so the renderer owns every colour and
+// column in one place. The section carries only evidence: the verdict above it
+// has already named the fault and its remedy, and repeating either would make
+// you read the same sentence twice to learn nothing new.
+const describeDaemon = (
+  dbPath: string,
+): { summary: string; section: DoctorSection } => {
+  const empty = { title: "Sync", lines: [] as DoctorLine[] }
+  if (!existsSync(dbPath))
+    return {
+      summary: "no database — pCloud Drive is not installed here",
+      section: empty,
+    }
 
   const snap = snapshot(dbPath)
   try {
     const pairs = readPairs(snap.db)
-    const problems = verdicts(pairs)
+    const broken = pairs.filter((pair) => pair.issues.length > 0)
+    const summary = `${pairs.length} pair${pairs.length === 1 ? "" : "s"} · daemon ${daemonRunning() ? "running" : "not running"}`
 
-    console.log(
-      `  ${pairs.length} sync pair(s) · pCloud Drive ${daemonRunning() ? "running" : "not running"}`,
-    )
-    if (problems.length === 0) {
-      console.log("✓ no local sync faults\n")
-      return
-    }
+    const lines: DoctorLine[] = broken.flatMap((pair) => {
+      const stranded = strandedTasks(snap.db, pair.id)
+      return [
+        {
+          glyph: pair.issues.some((issue) => CRITICAL.has(issue.kind))
+            ? ("bad" as const)
+            : ("warn" as const),
+          label: `#${pair.id}  ${shortenHome(pair.localpath)} → ${pair.remotepath ?? REMOTE_NONE}`,
+          detail: pair.issues.map((issue) => issue.detail).join(" · "),
+        },
+        // Two rows reading "usage-kud.tsv" say nothing about each other. The
+        // local id distinguishes them, and tells you they are two different
+        // files rather than one listed twice.
+        ...stranded.slice(0, 5).map((task) => ({
+          glyph: "note" as const,
+          label: `    ${task.name ?? "?"}`,
+          detail: `local id ${task.localitemid}`,
+        })),
+        ...(stranded.length > 5
+          ? [
+              {
+                glyph: "note" as const,
+                label: `    … and ${stranded.length - 5} more`,
+              },
+            ]
+          : []),
+      ]
+    })
 
-    problems.forEach((verdict) =>
-      console.log(
-        `${CRITICAL.has(verdict.kind) ? "🔥" : "🌶️"} ${verdict.count} ${verdict.detail}`,
-      ),
-    )
-
-    // A count and a pointer at another command is not a diagnosis. doctor
-    // already holds every pair and every issue; making you run `pcloud sync` to
-    // read what it just decided not to print is the wrong half of the work.
-    pairs
-      .filter((pair) => pair.issues.length > 0)
-      .forEach((pair) => {
-        console.log(`\n  #${pair.id}  ${shortenHome(pair.localpath)}`)
-        pair.issues.forEach((issue) => console.log(`     ${issue.detail}`))
-
-        const stranded = strandedTasks(snap.db, pair.id)
-        stranded
-          .slice(0, 5)
-          .forEach((task) =>
-            console.log(`       · ${task.name ?? "?"} (type ${task.type})`),
-          )
-        if (stranded.length > 5)
-          console.log(`       · … and ${stranded.length - 5} more`)
-
-        // The remedy differs by fault, and picking the wrong one is expensive:
-        // prune unpairs the folder outright, which is right for a pair pointed
-        // at a deleted remote and catastrophic for a healthy one with a stuck
-        // queue.
-        const orphaned = pair.issues.some((issue) => issue.kind === "orphaned")
-        console.log(
-          orphaned
-            ? `     → pcloud sync prune ${pair.id}`
-            : `     → pcloud sync clear-tasks ${pair.id}`,
-        )
-      })
-    console.log()
+    return { summary, section: { title: "Sync", lines } }
   } finally {
     snap.close()
   }
@@ -1552,6 +1580,7 @@ program
     "Check which commands your credential can reach, and the local sync daemon",
   )
   .option("--db <path>", "Read a different local database", PCLOUD_DB)
+  .option("--verbose", "List every endpoint, not just the ones with a problem")
   .action(async (options) => {
     try {
       const stored = tokenStore.load()
@@ -1569,50 +1598,133 @@ program
       // exactly the kind of fault someone hits before getting round to logging
       // in — so it still runs, and only the remote half is given up on.
       if (!auth) {
-        console.error("Not authenticated. Run `pcloud login` first.")
-        reportLocalDaemon(options.db)
+        const daemon = describeDaemon(options.db)
+        renderDoctor({
+          faults: [
+            {
+              area: "Credential",
+              detail: "not authenticated",
+              fix: "pcloud login",
+            },
+            ...localProblems(options.db).map((fault) => ({
+              area: "Sync",
+              detail: fault.detail,
+              fix: fault.fix,
+            })),
+          ],
+          summary: [{ label: "Sync", value: daemon.summary }],
+          sections: [daemon.section],
+        })
         process.exit(1)
       }
 
       const tier = "auth" in auth ? "session token" : "OAuth access token"
-      console.log(`\nCredential: ${tier}`)
-      if (stored?.expiresAt) {
-        const left = Math.round(
-          (stored.expiresAt - Date.now()) / (24 * 60 * 60 * 1000),
-        )
-        console.log(
-          `Expires:    ${new Date(stored.expiresAt).toLocaleString()} (${left} days)`,
-        )
-      }
-      console.log()
-
       const api = await getAuthenticatedAPI()
       const results = await checkAll(api, auth)
 
-      const width = Math.max(...results.map((r) => r.command.length))
-      results.forEach((r) =>
-        console.log(
-          `${HEALTH_GLYPH[r.health]} ${padEnd(r.command, width + 2)}${r.detail}`,
-        ),
-      )
-
       const blocked = results.filter((r) => r.health === "needs-session")
-      const missing = results.filter((r) => r.health === "missing")
+      const denied = results.filter((r) => r.health === "no-permission")
+      // Rewind's absence is permanent, documented and already worked around,
+      // so it is reported without being counted as a fault.
+      const missing = results.filter(
+        (r) => r.health === "missing" && !r.expected,
+      )
+      const absent = results.filter((r) => r.health === "missing" && r.expected)
+      const reachable = results.filter((r) => r.health === "ok")
 
-      if (blocked.length) {
-        console.log(
-          `\n${blocked.length} command(s) need a session token — run:\n\n  pcloud login --session\n`,
-        )
-      }
-      if (missing.length) {
-        console.log(
-          `${missing.length} command(s) call endpoints pCloud does not expose.\nFor Rewind, use \`pcloud rewind\` instead.\n`,
-        )
-      }
-      if (!blocked.length && !missing.length)
-        console.log("\nAll endpoints reachable.")
+      const localFaults = localProblems(options.db)
 
-      reportLocalDaemon(options.db)
+      // The verdict leads. Reading thirty green ticks to discover one stuck
+      // sync pair at the bottom is the wrong way round: what is wrong should be
+      // the first thing on screen, and everything below it is evidence.
+      const faults = [
+        ...localFaults.map((fault) => ({
+          area: "Sync",
+          detail: fault.detail,
+          fix: fault.fix,
+        })),
+        ...(blocked.length
+          ? [
+              {
+                area: "Credential",
+                detail: `${blocked.length} endpoint(s) need a session token`,
+                fix: "pcloud login --session",
+              },
+            ]
+          : []),
+        ...(denied.length
+          ? [
+              {
+                area: "Account",
+                detail: `${denied.length} endpoint(s) your plan does not allow`,
+                fix: undefined,
+              },
+            ]
+          : []),
+        ...(missing.length
+          ? [
+              {
+                area: "API",
+                detail: `${missing.length} endpoint(s) unexpectedly absent`,
+                fix: undefined,
+              },
+            ]
+          : []),
+      ]
+
+      const daemon = describeDaemon(options.db)
+
+      // Detail below the verdict, and only what is worth reading — the passing
+      // endpoints are a count unless you ask for them by name.
+      const shown = options.verbose
+        ? results
+        : [...blocked, ...denied, ...missing]
+
+      renderDoctor({
+        faults,
+        summary: [
+          {
+            label: "Credential",
+            value: `${tier}${
+              stored?.expiresAt
+                ? ` · ${Math.round((stored.expiresAt - Date.now()) / 86_400_000)} days left`
+                : ""
+            }`,
+          },
+          {
+            label: "API",
+            value: `${reachable.length} of ${results.length} endpoints reachable`,
+          },
+          { label: "Sync", value: daemon.summary },
+        ],
+        sections: [
+          daemon.section,
+          {
+            title: "API",
+            lines: shown.map((r) => ({
+              glyph:
+                r.health === "ok"
+                  ? ("ok" as const)
+                  : r.health === "missing"
+                    ? ("bad" as const)
+                    : ("warn" as const),
+              label: r.command,
+              detail: r.detail,
+            })),
+          },
+          {
+            title: "Not offered by pCloud",
+            lines: absent.map((r) => ({
+              glyph: "note" as const,
+              label: r.command,
+            })),
+            footnote: "Expected — `pcloud rewind` reconstructs it instead.",
+          },
+        ],
+      })
+
+      if (!options.verbose && !faults.length)
+        console.log("  --verbose lists every endpoint checked.\n")
     } catch (error) {
       handleError(error)
     }

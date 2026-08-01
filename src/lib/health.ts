@@ -12,7 +12,17 @@ export type CommandHealth = {
   method: string
   health: Health
   detail: string
+  /**
+   * True when pCloud is known never to have exposed this endpoint. Rewind is
+   * the only one: it is a web-app feature with no public API, `pcloud rewind`
+   * already reconstructs it from diff and revisions, and flagging it as a
+   * fault on every run is crying wolf — which teaches you to ignore the glyph
+   * that matters.
+   */
+  expected?: boolean
 }
+
+const KNOWN_ABSENT = new Set(["listrewindevents"])
 
 const SURFACE: [command: string, method: string][] = [
   ["whoami", "userinfo"],
@@ -74,6 +84,7 @@ export const checkCommand = async (
           method,
           health: "missing",
           detail: "endpoint does not exist",
+          expected: KNOWN_ABSENT.has(method),
         }
       : { command, method, health: "ok", detail: "reachable" }
   }
