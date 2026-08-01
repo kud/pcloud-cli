@@ -6,8 +6,10 @@ import { join } from "node:path"
 import {
   DEBUG_TABLES,
   OPEN,
+  applyClearTasks,
   applyPrune,
   backupPath,
+  planClearTasks,
   planPrune,
   readPairs,
   tableCounts,
@@ -25,7 +27,7 @@ const SCHEMA = `
   CREATE TABLE syncedfolder (syncid INTEGER, folderid INTEGER, localfolderid INTEGER);
   CREATE TABLE localfolder (id INTEGER PRIMARY KEY, syncid INTEGER);
   CREATE TABLE localfile (id INTEGER PRIMARY KEY, syncid INTEGER);
-  CREATE TABLE task (id INTEGER PRIMARY KEY, type INTEGER, syncid INTEGER, itemid INTEGER, localitemid INTEGER, name TEXT);
+  CREATE TABLE task (id INTEGER PRIMARY KEY, type INTEGER, syncid INTEGER, itemid INTEGER, localitemid INTEGER, inprogress INTEGER, name TEXT);
   CREATE TABLE setting (id TEXT PRIMARY KEY, value TEXT);
   CREATE TABLE cryptofilekey (fileid INTEGER PRIMARY KEY, key TEXT);
   CREATE TABLE cryptofolderkey (folderid INTEGER PRIMARY KEY, key TEXT);
@@ -59,10 +61,10 @@ const fixture = (): Fixture => {
     INSERT INTO localfolder (id, syncid) VALUES (1, 2), (2, 2), (3, 1);
     INSERT INTO localfile (id, syncid) VALUES (1, 2), (2, 2), (3, 2), (4, 1);
     INSERT INTO syncedfolder (syncid, folderid, localfolderid) VALUES (2, NULL, 1), (2, NULL, 2);
-    INSERT INTO task (id, type, syncid, itemid, localitemid, name) VALUES
-      (10, 1, 2, 0, 1868, 'usage'),
-      (11, 3, 2, 0, 7182, 'usage.tsv'),
-      (12, 1, 1, 4155, 900, 'fine');
+    INSERT INTO task (id, type, syncid, itemid, localitemid, inprogress, name) VALUES
+      (10, 1, 2, 0, 1868, 2, 'usage'),
+      (11, 3, 2, 0, 7182, 2, 'usage.tsv'),
+      (12, 1, 1, 4155, 900, 0, 'fine');
 
     INSERT INTO setting (id, value) VALUES ('auth', 'SECRET-TOKEN-DO-NOT-PRINT');
     INSERT INTO cryptofilekey (fileid, key) VALUES (1, 'SECRET-KEY-MATERIAL');
@@ -79,6 +81,9 @@ const fixture = (): Fixture => {
     },
   }
 }
+
+const rowCount = (db: DatabaseSync, table: string): number =>
+  (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n
 
 const kindsFor = (db: DatabaseSync, id: number): string[] =>
   (readPairs(db).find((pair) => pair.id === id)?.issues ?? []).map(
@@ -251,5 +256,86 @@ describe("debug allowlist", () => {
       "setting",
     ])
     f.dispose()
+  })
+})
+
+// prune and clear-tasks answer different faults, and confusing them is
+// expensive: pruning pair #1 on a real machine deletes 1,180 rows and unpairs
+// the folder, which is right for a pair pointed at a deleted remote and
+// catastrophic for a healthy one carrying stale queue entries.
+describe("planClearTasks", () => {
+  it("counts only the queued rows that never resolved a destination", () => {
+    const f = fixture()
+    try {
+      // Pair 2 has two tasks with itemid = 0 and one healthy pair-1 task with
+      // a real itemid, which must not be swept up.
+      expect(planClearTasks(f.db, 2).tasks.map((t) => t.name)).toEqual([
+        "usage",
+        "usage.tsv",
+      ])
+      expect(planClearTasks(f.db, 1).tasks).toEqual([])
+    } finally {
+      f.dispose()
+    }
+  })
+
+  it("refuses an id that is not a sync pair", () => {
+    const f = fixture()
+    try {
+      expect(() => planClearTasks(f.db, 999)).toThrow(/No sync pair/)
+    } finally {
+      f.dispose()
+    }
+  })
+})
+
+describe("applyClearTasks", () => {
+  it("deletes the stranded tasks and nothing else", () => {
+    const f = fixture()
+    const before = {
+      localfile: rowCount(f.db, "localfile"),
+      localfolder: rowCount(f.db, "localfolder"),
+      syncfolder: rowCount(f.db, "syncfolder"),
+      syncedfolder: rowCount(f.db, "syncedfolder"),
+    }
+    f.db.close()
+
+    try {
+      const { removed } = applyClearTasks(f.path, 2)
+      expect(removed).toBe(2)
+
+      const db = new DatabaseSync(f.path, OPEN)
+      // The pair, its index and its synced folders all survive — this is the
+      // whole difference from prune.
+      expect(rowCount(db, "localfile")).toBe(before.localfile)
+      expect(rowCount(db, "localfolder")).toBe(before.localfolder)
+      expect(rowCount(db, "syncfolder")).toBe(before.syncfolder)
+      expect(rowCount(db, "syncedfolder")).toBe(before.syncedfolder)
+      // The healthy task with a real destination is untouched.
+      expect(
+        (db.prepare("SELECT id FROM task").all() as { id: number }[]).map(
+          (r) => r.id,
+        ),
+      ).toEqual([12])
+      db.close()
+    } finally {
+      rmSync(f.path, { force: true })
+    }
+  })
+
+  it("backs the database up before touching it", () => {
+    const f = fixture()
+    f.db.close()
+    try {
+      const { backup } = applyClearTasks(f.path, 2)
+      expect(existsSync(backup)).toBe(true)
+
+      // The backup still holds the rows that were just removed.
+      const db = new DatabaseSync(backup, OPEN)
+      expect(rowCount(db, "task")).toBe(3)
+      db.close()
+    } finally {
+      rmSync(f.path, { force: true })
+    }
   })
 })

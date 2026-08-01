@@ -268,8 +268,55 @@ export const planPrune = (db: DatabaseSync, syncid: number): PrunePlan => {
   }
 }
 
+export type ClearTasksPlan = {
+  pair: SyncPair
+  tasks: Row[]
+}
+
+// Narrower than prune by two orders of magnitude, and deliberately so. Pruning
+// pair #1 deletes 1,180 rows and unpairs the folder outright — the right remedy
+// for a zombie pair whose remote was deleted, and wildly wrong for a healthy
+// pair carrying two stale queue entries.
+export const planClearTasks = (
+  db: DatabaseSync,
+  syncid: number,
+): ClearTasksPlan => {
+  const pair = readPairs(db).find((candidate) => candidate.id === syncid)
+  if (!pair) throw new Error(`No sync pair with id ${syncid}`)
+  return { pair, tasks: strandedTasks(db, syncid) }
+}
+
 export const backupPath = (dbPath: string, stamp: Date): string =>
   `${dbPath}.backup-${stamp.toISOString().slice(0, 19).replace(/:/g, "-")}`
+
+// Only rows with itemid = 0 — a task that never resolved a remote destination.
+// Anything with a destination is work the daemon can still finish, and deleting
+// it would drop a real upload rather than a stale entry.
+export const applyClearTasks = (
+  dbPath: string,
+  syncid: number,
+  stamp: Date = new Date(),
+): { backup: string; removed: number } => {
+  const backup = backupPath(dbPath, stamp)
+  copyFileSync(dbPath, backup)
+
+  const db = new DatabaseSync(dbPath, OPEN)
+  try {
+    db.exec("BEGIN")
+    try {
+      const result = db
+        .prepare("DELETE FROM task WHERE syncid = ? AND itemid = 0")
+        .run(syncid)
+      db.exec("COMMIT")
+      return { backup, removed: Number(result.changes) }
+    } catch (error) {
+      db.exec("ROLLBACK")
+      throw error
+    }
+  } finally {
+    db.close()
+  }
+}
 
 export const applyPrune = (
   dbPath: string,

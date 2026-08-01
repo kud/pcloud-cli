@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-08-01
+
+### Added
+
+- **`pcloud sync clear-tasks <id>`** removes queued operations that can never complete — rows with no remote destination, left behind when an upload resolved by another path. Dry run by default; `--apply` writes, after backing the database up and refusing while pCloud Drive is running.
+  - Deliberately narrow. `pcloud sync prune` deletes around 1,180 rows and unpairs the folder outright, which is right for a pair pointed at a deleted remote and catastrophic for a healthy one carrying two stale queue entries. This touches the `task` table and nothing else.
+
+### Changed
+
+- **`pcloud doctor` names the fault instead of deferring.** It reported a count of pairs with queued operations and then said "Detail: pcloud sync" — while already holding every pair and every issue. It now prints the affected pair, the individual files stuck in its queue, and the command that fixes that particular fault, which differs by kind.
+
+### Fixed
+
+- `--db <path>` works on `sync prune` and `sync clear-tasks` while pCloud Drive is running. The guard refused whenever the daemon was up, even against a copy in a temp directory that no daemon has ever held — which made the flag useless for exactly the rehearsal it exists for.
+
+[0.18.0]: https://github.com/kud/pcloud-cli/compare/v0.17.1...v0.18.0
+
+## [0.17.1] - 2026-08-01
+
+### Fixed
+
+- The Sync and Settings tabs take the full width. Both were still handing 45% of it to the Files preview panel, which has nothing to say about either, and the queue column was being truncated as a result.
+- Reloading the Sync tab shows that it happened. `r` re-reads the whole 120 MB database in about 170 ms, but a reload that finds identical data changes nothing on screen — so it looked broken. The tab now prints when it was last read.
+
+[0.17.1]: https://github.com/kud/pcloud-cli/compare/v0.17.0...v0.17.1
+
 ## [0.17.0] - 2026-08-01
 
 ### Added

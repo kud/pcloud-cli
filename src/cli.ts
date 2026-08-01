@@ -36,9 +36,11 @@ import {
 import { checkAll } from "./lib/health.js"
 import {
   PCLOUD_DB,
+  applyClearTasks,
   applyPrune,
   daemonRunning,
   databaseLocked,
+  planClearTasks,
   planPrune,
   readPairs,
   snapshot,
@@ -1237,7 +1239,37 @@ const reportLocalDaemon = (dbPath: string): void => {
         `${CRITICAL.has(verdict.kind) ? "🔥" : "🌶️"} ${verdict.count} ${verdict.detail}`,
       ),
     )
-    console.log("\n  Detail: pcloud sync\n")
+
+    // A count and a pointer at another command is not a diagnosis. doctor
+    // already holds every pair and every issue; making you run `pcloud sync` to
+    // read what it just decided not to print is the wrong half of the work.
+    pairs
+      .filter((pair) => pair.issues.length > 0)
+      .forEach((pair) => {
+        console.log(`\n  #${pair.id}  ${shortenHome(pair.localpath)}`)
+        pair.issues.forEach((issue) => console.log(`     ${issue.detail}`))
+
+        const stranded = strandedTasks(snap.db, pair.id)
+        stranded
+          .slice(0, 5)
+          .forEach((task) =>
+            console.log(`       · ${task.name ?? "?"} (type ${task.type})`),
+          )
+        if (stranded.length > 5)
+          console.log(`       · … and ${stranded.length - 5} more`)
+
+        // The remedy differs by fault, and picking the wrong one is expensive:
+        // prune unpairs the folder outright, which is right for a pair pointed
+        // at a deleted remote and catastrophic for a healthy one with a stuck
+        // queue.
+        const orphaned = pair.issues.some((issue) => issue.kind === "orphaned")
+        console.log(
+          orphaned
+            ? `     → pcloud sync prune ${pair.id}`
+            : `     → pcloud sync clear-tasks ${pair.id}`,
+        )
+      })
+    console.log()
   } finally {
     snap.close()
   }
@@ -1348,7 +1380,14 @@ sync
       // back, so deleting underneath a running pCloud Drive either loses the edit
       // or corrupts the WAL. Both checks are kept: the process may have exited
       // while still holding the file, and the file may be held by something else.
-      if (daemonRunning() || databaseLocked(options.db)) {
+      // The daemon guard applies to the database the daemon actually holds.
+      // --db exists so this can be rehearsed against a copy, and refusing
+      // there made the flag useless — a running pCloud Drive has no opinion
+      // about a file in /tmp. The lock check still runs either way.
+      if (
+        (options.db === PCLOUD_DB && daemonRunning()) ||
+        databaseLocked(options.db)
+      ) {
         console.error("Error: pCloud Drive is running and holds this database.")
         console.error("Quit pCloud Drive, then run this again.\n")
         process.exit(1)
@@ -1358,6 +1397,82 @@ sync
       console.log(`✓ Removed ${removed} rows for sync pair #${syncid}`)
       console.log(`  Backup: ${shortenHome(backup)}`)
       console.log("  Start pCloud Drive again to confirm the error is gone.\n")
+    } catch (error) {
+      handleError(error)
+    }
+  })
+
+sync
+  .command("clear-tasks")
+  .description("Clear queued operations that can never complete")
+  .argument("<id>", "Sync pair id (from `pcloud sync`)")
+  .option("--apply", "Perform the deletion (default is a dry run)")
+  .option("--db <path>", "Operate on a different database file", PCLOUD_DB)
+  .action((id: string, options) => {
+    try {
+      const syncid = parseInt(id, 10)
+      const snap = snapshot(options.db)
+      const plan = (() => {
+        try {
+          return planClearTasks(snap.db, syncid)
+        } finally {
+          snap.close()
+        }
+      })()
+
+      console.log(`\nSync pair #${syncid}`)
+      console.log(`  Local     ${shortenHome(plan.pair.localpath)}`)
+      console.log(`  Remote    ${plan.pair.remotepath ?? REMOTE_NONE}\n`)
+
+      if (plan.tasks.length === 0) {
+        console.log(
+          "Nothing queued without a destination — nothing to clear.\n",
+        )
+        return
+      }
+
+      // Named individually rather than counted: these are real files, and
+      // seeing which ones is what tells you whether the queue is stale or
+      // whether pCloud is still genuinely trying to move something.
+      console.log("Queued with no destination:")
+      plan.tasks.forEach((task) =>
+        console.log(
+          `  ${padEnd(String(task.name ?? "?"), 40)}type ${task.type}  local id ${task.localitemid}`,
+        ),
+      )
+      console.log(`\n  ${plan.tasks.length} row(s) in the task table.`)
+      console.log(
+        "  Only these rows go. The sync pair, its index and your files are untouched\n" +
+          "  — unlike `pcloud sync prune`, which unpairs the folder entirely.\n",
+      )
+
+      if (!options.apply) {
+        console.log("This was a dry run. Re-run with --apply to perform it.\n")
+        return
+      }
+
+      // Same reasoning as prune: the daemon holds its queue in memory and
+      // writes it back, so deleting underneath a running pCloud Drive either
+      // loses the edit or corrupts the WAL.
+      // The daemon guard applies to the database the daemon actually holds.
+      // --db exists so this can be rehearsed against a copy, and refusing
+      // there made the flag useless — a running pCloud Drive has no opinion
+      // about a file in /tmp. The lock check still runs either way.
+      if (
+        (options.db === PCLOUD_DB && daemonRunning()) ||
+        databaseLocked(options.db)
+      ) {
+        console.error("Error: pCloud Drive is running and holds this database.")
+        console.error("Quit pCloud Drive, then run this again.\n")
+        process.exit(1)
+      }
+
+      const { backup, removed } = applyClearTasks(options.db, syncid)
+      console.log(`✓ Cleared ${removed} queued operation(s)`)
+      console.log(`  Backup: ${shortenHome(backup)}`)
+      console.log(
+        "  Start pCloud Drive again to confirm the warning is gone.\n",
+      )
     } catch (error) {
       handleError(error)
     }
@@ -1624,9 +1739,14 @@ const applyIgnore = (
   // failing reads as a partial write.
   assertWritable({ force: options.force })
 
-  const { backup } = writeSettings({ [key]: formatList(next) }, dbPath, new Date(), {
-    force: options.force,
-  })
+  const { backup } = writeSettings(
+    { [key]: formatList(next) },
+    dbPath,
+    new Date(),
+    {
+      force: options.force,
+    },
+  )
   console.log(`\n✓ ${key} updated. Previous database: ${backup}\n`)
 }
 
