@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-08-01
+
+### Changed
+
+- **In the browser, going up a folder returns to the folder you came out of**
+  rather than the top of the list. Going up is usually a step sideways into a
+  neighbour, and landing back at the first row meant scrolling to find where you
+  had just been.
+
+[1.1.0]: https://github.com/kud/pcloud-cli/compare/v1.0.1...v1.1.0
+
 ## [1.0.1] - 2026-08-01
 
 ### Changed
