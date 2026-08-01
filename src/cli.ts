@@ -2025,12 +2025,22 @@ ignoreWriteOptions(
 // tool has a full interface, that interface is the tool and needs no verb.
 // `--help` and every subcommand are untouched, so nothing scripted changes —
 // only the case that previously printed usage and did nothing useful.
-const invokedBare = process.argv.length <= 2
+// --mock drives the whole interface from fixtures: an invented account, with
+// invented sync pairs and settings. It exists so a screenshot never has to show
+// a real drive — a folder listing says more about someone than they usually
+// intend, and every screenshot of this tool so far has been of somebody's
+// actual files.
+//
+// Checked here rather than declared as a commander option because it applies
+// to the bare invocation, which commander never sees.
+const mock = process.argv.includes("--mock")
+const invokedBare = process.argv.filter((a) => a !== "--mock").length <= 2
 
 if (invokedBare) {
-  requireStoredAuth()
+  // No credential needed in mock mode — that is most of the point.
+  if (!mock) requireStoredAuth()
   const { startBrowse } = await import("./browse.js")
-  await startBrowse()
+  await startBrowse(mock)
 } else {
   program.parse()
 }

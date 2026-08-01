@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-08-01
+
+### Added
+
+- **`pcloud --mock`** opens the browser on an invented account — folders,
+  changes, shares, sync pairs and settings, none of them real. No credential is
+  required and nothing touches the network, so it works on a machine that has
+  never logged in.
+  - For screenshots and demos. A folder listing says more about someone than
+    they usually intend, and the alternative is screenshotting a real drive.
+  - Every source is swapped at once. Half-mocking would be worse than not
+    offering it: invented files beside your real sync folders is the outcome
+    this exists to prevent.
+
+### Fixed
+
+- `@kud/pcloud-ink` shipped a nested second copy of `@kud/pcloud`, so the
+  `PCloudAPI` type on either side of the boundary did not unify. It is a peer
+  dependency now.
+
+[1.2.0]: https://github.com/kud/pcloud-cli/compare/v1.1.0...v1.2.0
+
 ## [1.1.0] - 2026-08-01
 
 ### Changed
