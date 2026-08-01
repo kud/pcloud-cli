@@ -43,6 +43,7 @@ import {
   type DoctorSection,
 } from "./render.js"
 import { checkAll } from "./lib/health.js"
+import { resolveFileId, resolveFolderId } from "./lib/refs.js"
 import {
   PCLOUD_DB,
   applyClearTasks,
@@ -442,11 +443,13 @@ program
 program
   .command("rmdir")
   .description("Recursively delete a folder and all its contents")
-  .argument("<folderid>", "Folder ID to delete")
-  .action(async (folderid: string) => {
+  .argument("<folder>", "Folder path or id to delete")
+  .action(async (folder: string) => {
     try {
       const api = await getAuthenticatedAPI()
-      const response = await api.deleteFolder(parseInt(folderid, 10))
+      const response = await api.deleteFolder(
+        await resolveFolderId(api, folder),
+      )
       assertSuccess(response.result, response.error)
       ok("Done")
     } catch (error) {
@@ -457,12 +460,15 @@ program
 program
   .command("copy-file")
   .description("Copy a file to a new path")
-  .argument("<fileid>", "File ID to copy")
+  .argument("<file>", "File path or id to copy")
   .argument("<topath>", "Destination path")
-  .action(async (fileid: string, topath: string) => {
+  .action(async (file: string, topath: string) => {
     try {
       const api = await getAuthenticatedAPI()
-      const response = await api.copyFile(parseInt(fileid, 10), topath)
+      const response = await api.copyFile(
+        await resolveFileId(api, file),
+        topath,
+      )
       assertSuccess(response.result, response.error)
       ok("Done")
     } catch (error) {
@@ -473,12 +479,15 @@ program
 program
   .command("move-file")
   .description("Move a file to a new path")
-  .argument("<fileid>", "File ID to move")
+  .argument("<file>", "File path or id to move")
   .argument("<topath>", "Destination path")
-  .action(async (fileid: string, topath: string) => {
+  .action(async (file: string, topath: string) => {
     try {
       const api = await getAuthenticatedAPI()
-      const response = await api.moveFile(parseInt(fileid, 10), topath)
+      const response = await api.moveFile(
+        await resolveFileId(api, file),
+        topath,
+      )
       assertSuccess(response.result, response.error)
       ok("Done")
     } catch (error) {
@@ -489,12 +498,15 @@ program
 program
   .command("rename-file")
   .description("Rename a file")
-  .argument("<fileid>", "File ID to rename")
+  .argument("<file>", "File path or id to rename")
   .argument("<toname>", "New file name")
-  .action(async (fileid: string, toname: string) => {
+  .action(async (file: string, toname: string) => {
     try {
       const api = await getAuthenticatedAPI()
-      const response = await api.renameFile(parseInt(fileid, 10), toname)
+      const response = await api.renameFile(
+        await resolveFileId(api, file),
+        toname,
+      )
       assertSuccess(response.result, response.error)
       ok("Done")
     } catch (error) {
@@ -505,11 +517,11 @@ program
 program
   .command("delete-file")
   .description("Permanently delete a file")
-  .argument("<fileid>", "File ID to delete")
-  .action(async (fileid: string) => {
+  .argument("<file>", "File path or id to delete")
+  .action(async (file: string) => {
     try {
       const api = await getAuthenticatedAPI()
-      const response = await api.deleteFile(parseInt(fileid, 10))
+      const response = await api.deleteFile(await resolveFileId(api, file))
       assertSuccess(response.result, response.error)
       ok("Done")
     } catch (error) {
@@ -520,11 +532,11 @@ program
 program
   .command("get-link")
   .description("Get a download URL for a file")
-  .argument("<fileid>", "File ID")
-  .action(async (fileid: string) => {
+  .argument("<file>", "File path or id")
+  .action(async (file: string) => {
     try {
       const api = await getAuthenticatedAPI()
-      const response = await api.getFileLink(parseInt(fileid, 10))
+      const response = await api.getFileLink(await resolveFileId(api, file))
       assertSuccess(response.result, response.error)
       console.log(`https://${response.hosts[0]}${response.path}`)
     } catch (error) {
@@ -535,11 +547,11 @@ program
 program
   .command("checksum")
   .description("Print SHA256, SHA1 and MD5 checksums for a file")
-  .argument("<fileid>", "File ID")
-  .action(async (fileid: string) => {
+  .argument("<file>", "File path or id")
+  .action(async (file: string) => {
     try {
       const api = await getAuthenticatedAPI()
-      const response = await api.checksumFile(parseInt(fileid, 10))
+      const response = await api.checksumFile(await resolveFileId(api, file))
       assertSuccess(response.result, response.error)
       console.log(`SHA256  ${response.sha256}`)
       console.log(`SHA1    ${response.sha1}`)
@@ -552,11 +564,11 @@ program
 program
   .command("list-revisions")
   .description("List revisions for a file")
-  .argument("<fileid>", "File ID")
-  .action(async (fileid: string) => {
+  .argument("<file>", "File path or id")
+  .action(async (file: string) => {
     try {
       const api = await getAuthenticatedAPI()
-      const response = await api.listRevisions(parseInt(fileid, 10))
+      const response = await api.listRevisions(await resolveFileId(api, file))
       assertSuccess(response.result, response.error)
 
       renderRevisions(response.revisions ?? [])
@@ -568,13 +580,13 @@ program
 program
   .command("revert-revision")
   .description("Revert a file to a previous revision")
-  .argument("<fileid>", "File ID")
+  .argument("<file>", "File path or id")
   .argument("<revisionid>", "Revision ID to revert to")
-  .action(async (fileid: string, revisionid: string) => {
+  .action(async (file: string, revisionid: string) => {
     try {
       const api = await getAuthenticatedAPI()
       const response = await api.revertRevision(
-        parseInt(fileid, 10),
+        await resolveFileId(api, file),
         parseInt(revisionid, 10),
       )
       assertSuccess(response.result, response.error)
@@ -648,17 +660,17 @@ program
   .description(
     "Share a folder with another pCloud user (permissions: 1=Create, 2=Modify, 4=Delete)",
   )
-  .argument("<folderid>", "Folder ID to share")
+  .argument("<folder>", "Folder path or id to share")
   .argument("<email>", "Recipient email address")
   .argument(
     "<permissions>",
     "Permission bitmask (1=Create, 2=Modify, 4=Delete)",
   )
-  .action(async (folderid: string, email: string, permissions: string) => {
+  .action(async (folder: string, email: string, permissions: string) => {
     try {
       const api = await getAuthenticatedAPI()
       const response = await api.shareFolder(
-        parseInt(folderid, 10),
+        await resolveFolderId(api, folder),
         email,
         parseInt(permissions, 10),
       )
@@ -717,18 +729,18 @@ program
 program
   .command("publink-file")
   .description("Create a public download link for a file")
-  .argument("<fileid>", "File ID")
+  .argument("<file>", "File path or id")
   .option("--expire <date>", "Expiry datetime (YYYY-MM-DD HH:MM:SS)")
   .option("--max-downloads <n>", "Maximum number of downloads")
   .action(
     async (
-      fileid: string,
+      file: string,
       options: { expire?: string; maxDownloads?: string },
     ) => {
       try {
         const api = await getAuthenticatedAPI()
         const response = await api.getFilePublink(
-          parseInt(fileid, 10),
+          await resolveFileId(api, file),
           options.expire,
           options.maxDownloads !== undefined
             ? parseInt(options.maxDownloads, 10)
@@ -745,13 +757,13 @@ program
 program
   .command("publink-folder")
   .description("Create a public link for a folder")
-  .argument("<folderid>", "Folder ID")
+  .argument("<folder>", "Folder path or id")
   .option("--expire <date>", "Expiry datetime (YYYY-MM-DD HH:MM:SS)")
-  .action(async (folderid: string, options: { expire?: string }) => {
+  .action(async (folder: string, options: { expire?: string }) => {
     try {
       const api = await getAuthenticatedAPI()
       const response = await api.getFolderPublink(
-        parseInt(folderid, 10),
+        await resolveFolderId(api, folder),
         options.expire,
       )
       assertSuccess(response.result, response.error)
@@ -794,19 +806,22 @@ program
 program
   .command("zip")
   .description("Get a download URL for a ZIP archive of files and/or folders")
-  .argument("<fileid...>", "File IDs to include in the ZIP")
-  .option("--folderid <id...>", "Folder IDs to include in the ZIP")
+  .argument("<files...>", "File paths or ids to include in the ZIP")
+  .option("--folder <folder...>", "Folder paths or ids to include")
   .option("--filename <name>", "Name for the ZIP file")
   .action(
     async (
-      fileids: string[],
-      options: { folderid?: string[]; filename?: string },
+      files: string[],
+      options: { folder?: string[]; filename?: string },
     ) => {
       try {
         const api = await getAuthenticatedAPI()
         const response = await api.getZipLink(
-          fileids.map((id) => parseInt(id, 10)),
-          options.folderid?.map((id) => parseInt(id, 10)),
+          await Promise.all(files.map((ref) => resolveFileId(api, ref))),
+          options.folder &&
+            (await Promise.all(
+              options.folder.map((ref) => resolveFolderId(api, ref)),
+            )),
           options.filename,
         )
         assertSuccess(response.result, response.error)
