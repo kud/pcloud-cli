@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-08-01
+
+### Added
+
+- **A Sync tab in the browser**, showing each pair's local and remote folder, file count and queue depth, with any problems spelled out beneath. Read-only on purpose: pCloud keys a pair by the local folder's inode and indexes it across three further tables, so writing one by hand hands the daemon a pair it never built — and the failure mode is deleted local files rather than a sync that simply fails to start.
+- **A Settings tab** listing the ignore rules, with enter offering to stop ignoring an entry behind a confirmation. Writing goes through the same guard as `pcloud settings`, so it refuses while pCloud Drive is running rather than being silently undone when the daemon next quits.
+- Both tabs appear only when the host can supply the data. They read a SQLite database on this machine rather than your account, so `@kud/pcloud-ink` takes them as providers instead of opening the file itself — a rendering package with a `node:sqlite` dependency would be the wrong shape, and a consumer with no local pCloud install should not be offered a tab that could only ever be empty.
+
+[0.17.0]: https://github.com/kud/pcloud-cli/compare/v0.16.0...v0.17.0
+
 ## [0.16.0] - 2026-08-01
 
 ### Added
