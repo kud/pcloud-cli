@@ -84,6 +84,45 @@ export const daemonRunning = (): boolean => {
   }
 }
 
+// AppleScript rather than a signal, so pCloud Drive shuts down cleanly and
+// finishes flushing its own state first — the very state a SIGTERM mid-write is
+// most likely to leave torn.
+//
+// Quitting is not enough on its own; the exit has to be confirmed. Sleeping and
+// assuming produces the same corruption with an extra delay in front of it.
+export const quitDaemon = (timeoutMs = 15_000): boolean => {
+  if (!daemonRunning()) return true
+  try {
+    execFileSync(
+      "osascript",
+      ["-e", 'tell application "pCloud Drive" to quit'],
+      {
+        stdio: "ignore",
+      },
+    )
+  } catch {
+    return false
+  }
+
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (!daemonRunning()) return true
+    execFileSync("sleep", ["0.5"], { stdio: "ignore" })
+  }
+  return false
+}
+
+// -g keeps it behind the terminal: stealing focus at the end of a command is
+// its own small breakage.
+export const startDaemon = (): boolean => {
+  try {
+    execFileSync("open", ["-g", "-a", "pCloud Drive"], { stdio: "ignore" })
+    return true
+  } catch {
+    return false
+  }
+}
+
 export const databaseLocked = (dbPath: string = PCLOUD_DB): boolean => {
   try {
     execFileSync("lsof", ["--", dbPath], { stdio: "ignore" })
@@ -206,7 +245,7 @@ export const readPairs = (db: DatabaseSync): SyncPair[] => {
     if (stranded > 0) {
       issues.push({
         kind: "stuck",
-        detail: `${stranded} queued operation(s) with no destination`,
+        detail: `${stranded} queued operation${stranded === 1 ? "" : "s"} with no destination`,
       })
     }
 

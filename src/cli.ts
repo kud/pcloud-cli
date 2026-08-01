@@ -33,6 +33,12 @@ import {
   renderShares,
   renderTable,
   renderTrash,
+  fail,
+  fields,
+  heading,
+  note,
+  ok,
+  warn,
   type DoctorLine,
   type DoctorSection,
 } from "./render.js"
@@ -45,6 +51,8 @@ import {
   databaseLocked,
   planClearTasks,
   planPrune,
+  quitDaemon,
+  startDaemon,
   readPairs,
   snapshot,
   strandedTasks,
@@ -368,7 +376,7 @@ program
     }
 
     tokenStore.delete()
-    console.log("✓ Local credentials removed")
+    ok("Local credentials removed")
   })
 
 program
@@ -425,7 +433,7 @@ program
       const api = await getAuthenticatedAPI()
       const response = await api.createFolder(path)
       assertSuccess(response.result, response.error)
-      console.log("✓ Done")
+      ok("Done")
     } catch (error) {
       handleError(error)
     }
@@ -440,7 +448,7 @@ program
       const api = await getAuthenticatedAPI()
       const response = await api.deleteFolder(parseInt(folderid, 10))
       assertSuccess(response.result, response.error)
-      console.log("✓ Done")
+      ok("Done")
     } catch (error) {
       handleError(error)
     }
@@ -456,7 +464,7 @@ program
       const api = await getAuthenticatedAPI()
       const response = await api.copyFile(parseInt(fileid, 10), topath)
       assertSuccess(response.result, response.error)
-      console.log("✓ Done")
+      ok("Done")
     } catch (error) {
       handleError(error)
     }
@@ -472,7 +480,7 @@ program
       const api = await getAuthenticatedAPI()
       const response = await api.moveFile(parseInt(fileid, 10), topath)
       assertSuccess(response.result, response.error)
-      console.log("✓ Done")
+      ok("Done")
     } catch (error) {
       handleError(error)
     }
@@ -488,7 +496,7 @@ program
       const api = await getAuthenticatedAPI()
       const response = await api.renameFile(parseInt(fileid, 10), toname)
       assertSuccess(response.result, response.error)
-      console.log("✓ Done")
+      ok("Done")
     } catch (error) {
       handleError(error)
     }
@@ -503,7 +511,7 @@ program
       const api = await getAuthenticatedAPI()
       const response = await api.deleteFile(parseInt(fileid, 10))
       assertSuccess(response.result, response.error)
-      console.log("✓ Done")
+      ok("Done")
     } catch (error) {
       handleError(error)
     }
@@ -570,7 +578,7 @@ program
         parseInt(revisionid, 10),
       )
       assertSuccess(response.result, response.error)
-      console.log("✓ Done")
+      ok("Done")
     } catch (error) {
       handleError(error)
     }
@@ -655,7 +663,7 @@ program
         parseInt(permissions, 10),
       )
       assertSuccess(response.result, response.error)
-      console.log("✓ Done")
+      ok("Done")
     } catch (error) {
       handleError(error)
     }
@@ -670,7 +678,7 @@ program
       const api = await getAuthenticatedAPI()
       const response = await api.acceptShare(parseInt(sharerequestid, 10))
       assertSuccess(response.result, response.error)
-      console.log("✓ Done")
+      ok("Done")
     } catch (error) {
       handleError(error)
     }
@@ -685,7 +693,7 @@ program
       const api = await getAuthenticatedAPI()
       const response = await api.declineShare(parseInt(sharerequestid, 10))
       assertSuccess(response.result, response.error)
-      console.log("✓ Done")
+      ok("Done")
     } catch (error) {
       handleError(error)
     }
@@ -700,7 +708,7 @@ program
       const api = await getAuthenticatedAPI()
       const response = await api.removeShare(parseInt(shareid, 10))
       assertSuccess(response.result, response.error)
-      console.log("✓ Done")
+      ok("Done")
     } catch (error) {
       handleError(error)
     }
@@ -777,7 +785,7 @@ program
       const api = await getAuthenticatedAPI()
       const response = await api.deletePublink(code)
       assertSuccess(response.result, response.error)
-      console.log("✓ Done")
+      ok("Done")
     } catch (error) {
       handleError(error)
     }
@@ -1087,7 +1095,7 @@ program
 
       outcomes
         .filter((o) => o.ok)
-        .forEach((o) => console.log(`✓ ${o.action.path} — ${o.detail}`))
+        .forEach((o) => ok(`${o.action.path} — ${o.detail}`))
       failed.forEach((o) => console.error(`✗ ${o.action.path} — ${o.detail}`))
 
       console.log(
@@ -1220,6 +1228,59 @@ const renderDebug = (snap: ReturnType<typeof snapshot>): void => {
 // remedy differs by kind — prune unpairs a folder outright, which is right for
 // a pair pointed at a deleted remote and catastrophic for a healthy one with a
 // stuck queue. Naming the wrong command here would be worse than naming none.
+// Erroring with "quit pCloud Drive and retry" makes you do by hand what the
+// command could do for you — and it is a fiddly dance: quit, confirm it really
+// exited, run, restart. Offering it is strictly better, provided the restart
+// happens even when the write fails.
+const withDaemonStopped = async <T>(
+  dbPath: string,
+  assumeYes: boolean,
+  work: () => T,
+): Promise<T | undefined> => {
+  const daemonWasRunning = dbPath === PCLOUD_DB && daemonRunning()
+
+  if (daemonWasRunning) {
+    if (!assumeYes) {
+      warn("pCloud Drive is running and holds this database.")
+      note("It must be quit for the write to stick — it rewrites its own state")
+      note("from memory when it exits, and would undo the change silently.")
+      const answer = await ask(
+        "\nQuit pCloud Drive, apply, and restart it? [y/N] ",
+      )
+      if (!/^y(es)?$/i.test(answer)) {
+        fail("Cancelled — nothing was changed.")
+        return undefined
+      }
+    }
+
+    note("Quitting pCloud Drive…")
+    if (!quitDaemon()) {
+      fail("pCloud Drive did not quit — nothing was changed.")
+      return undefined
+    }
+  }
+
+  // The database can still be held by something that is not the daemon, and
+  // that is not ours to close.
+  if (databaseLocked(dbPath)) {
+    fail(`Something still holds ${shortenHome(dbPath)} — nothing was changed.`)
+    if (daemonWasRunning) startDaemon()
+    return undefined
+  }
+
+  try {
+    return work()
+  } finally {
+    // In a finally, so a failed write still leaves your sync running. Leaving
+    // pCloud Drive quit because a command threw would be a worse outcome than
+    // the thing that threw.
+    if (daemonWasRunning) {
+      note("Restarting pCloud Drive…")
+      startDaemon()
+    }
+  }
+}
+
 const localProblems = (dbPath: string): { detail: string; fix?: string }[] => {
   if (!existsSync(dbPath)) return []
   const snap = snapshot(dbPath)
@@ -1270,34 +1331,44 @@ const describeDaemon = (
 
     const lines: DoctorLine[] = broken.flatMap((pair) => {
       const stranded = strandedTasks(snap.db, pair.id)
+      const critical = pair.issues.some((issue) => CRITICAL.has(issue.kind))
       return [
         {
-          glyph: pair.issues.some((issue) => CRITICAL.has(issue.kind))
-            ? ("bad" as const)
-            : ("warn" as const),
+          glyph: critical ? ("bad" as const) : ("warn" as const),
           label: `#${pair.id}  ${shortenHome(pair.localpath)} → ${pair.remotepath ?? REMOTE_NONE}`,
-          detail: pair.issues.map((issue) => issue.detail).join(" · "),
         },
+        // The issue gets its own line rather than trailing the path as muted
+        // detail. It is the finding — the single most important sentence in
+        // the report — and painting it dimmer than the path it belongs to had
+        // the hierarchy exactly backwards.
+        ...pair.issues.map((issue) => ({
+          glyph: critical ? ("bad" as const) : ("warn" as const),
+          label: `    ${issue.detail}`,
+        })),
         // Two rows reading "usage-kud.tsv" say nothing about each other. The
         // local id distinguishes them, and tells you they are two different
         // files rather than one listed twice.
         ...stranded.slice(0, 5).map((task) => ({
           glyph: "note" as const,
-          label: `    ${task.name ?? "?"}`,
+          label: `      ${task.name ?? "?"}`,
           detail: `local id ${task.localitemid}`,
         })),
         ...(stranded.length > 5
           ? [
               {
                 glyph: "note" as const,
-                label: `    … and ${stranded.length - 5} more`,
+                label: `      … and ${stranded.length - 5} more`,
               },
             ]
           : []),
       ]
     })
 
-    return { summary, section: { title: "Sync", lines } }
+    const title =
+      broken.length === 0
+        ? "Sync"
+        : `Sync — ${broken.length} pair${broken.length === 1 ? "" : "s"} need attention`
+    return { summary, section: { title, lines } }
   } finally {
     snap.close()
   }
@@ -1368,8 +1439,9 @@ sync
   .description("Remove an orphaned sync pair and its local index")
   .argument("<id>", "Sync pair id (from `pcloud sync`)")
   .option("--apply", "Perform the deletion (default is a dry run)")
+  .option("--yes", "Do not ask before quitting pCloud Drive")
   .option("--db <path>", "Operate on a different database file", PCLOUD_DB)
-  .action((id: string, options) => {
+  .action(async (id: string, options) => {
     try {
       const syncid = parseInt(id, 10)
       const snap = snapshot(options.db)
@@ -1412,19 +1484,13 @@ sync
       // --db exists so this can be rehearsed against a copy, and refusing
       // there made the flag useless — a running pCloud Drive has no opinion
       // about a file in /tmp. The lock check still runs either way.
-      if (
-        (options.db === PCLOUD_DB && daemonRunning()) ||
-        databaseLocked(options.db)
-      ) {
-        console.error("Error: pCloud Drive is running and holds this database.")
-        console.error("Quit pCloud Drive, then run this again.\n")
-        process.exit(1)
-      }
+      const pruned = await withDaemonStopped(options.db, options.yes, () =>
+        applyPrune(options.db, syncid),
+      )
+      if (!pruned) process.exit(1)
 
-      const { backup, removed } = applyPrune(options.db, syncid)
-      console.log(`✓ Removed ${removed} rows for sync pair #${syncid}`)
-      console.log(`  Backup: ${shortenHome(backup)}`)
-      console.log("  Start pCloud Drive again to confirm the error is gone.\n")
+      ok(`Removed ${pruned.removed} rows for sync pair #${syncid}`)
+      note(`Backup: ${shortenHome(pruned.backup)}`)
     } catch (error) {
       handleError(error)
     }
@@ -1435,8 +1501,9 @@ sync
   .description("Clear queued operations that can never complete")
   .argument("<id>", "Sync pair id (from `pcloud sync`)")
   .option("--apply", "Perform the deletion (default is a dry run)")
+  .option("--yes", "Do not ask before quitting pCloud Drive")
   .option("--db <path>", "Operate on a different database file", PCLOUD_DB)
-  .action((id: string, options) => {
+  .action(async (id: string, options) => {
     try {
       const syncid = parseInt(id, 10)
       const snap = snapshot(options.db)
@@ -1448,34 +1515,36 @@ sync
         }
       })()
 
-      console.log(`\nSync pair #${syncid}`)
-      console.log(`  Local     ${shortenHome(plan.pair.localpath)}`)
-      console.log(`  Remote    ${plan.pair.remotepath ?? REMOTE_NONE}\n`)
+      heading(`Sync pair #${syncid}`)
+      fields([
+        { label: "Local", value: shortenHome(plan.pair.localpath) },
+        { label: "Remote", value: plan.pair.remotepath ?? REMOTE_NONE },
+      ])
 
       if (plan.tasks.length === 0) {
-        console.log(
-          "Nothing queued without a destination — nothing to clear.\n",
-        )
+        ok("Nothing queued without a destination — nothing to clear.")
         return
       }
 
       // Named individually rather than counted: these are real files, and
       // seeing which ones is what tells you whether the queue is stale or
       // whether pCloud is still genuinely trying to move something.
-      console.log("Queued with no destination:")
-      plan.tasks.forEach((task) =>
-        console.log(
-          `  ${padEnd(String(task.name ?? "?"), 40)}type ${task.type}  local id ${task.localitemid}`,
-        ),
+      heading(
+        `${plan.tasks.length} queued operation${plan.tasks.length === 1 ? "" : "s"} with no destination`,
       )
-      console.log(`\n  ${plan.tasks.length} row(s) in the task table.`)
-      console.log(
-        "  Only these rows go. The sync pair, its index and your files are untouched\n" +
-          "  — unlike `pcloud sync prune`, which unpairs the folder entirely.\n",
+      fields(
+        plan.tasks.map((task) => ({
+          label: String(task.name ?? "?"),
+          value: `local id ${task.localitemid}`,
+        })),
       )
+      note("")
+      note("Only these rows go — the sync pair, its index and your files stay.")
+      note("`pcloud sync prune` is the one that unpairs the folder entirely.")
 
       if (!options.apply) {
-        console.log("This was a dry run. Re-run with --apply to perform it.\n")
+        note("")
+        warn("Dry run. Re-run with --apply to perform it.")
         return
       }
 
@@ -1486,21 +1555,15 @@ sync
       // --db exists so this can be rehearsed against a copy, and refusing
       // there made the flag useless — a running pCloud Drive has no opinion
       // about a file in /tmp. The lock check still runs either way.
-      if (
-        (options.db === PCLOUD_DB && daemonRunning()) ||
-        databaseLocked(options.db)
-      ) {
-        console.error("Error: pCloud Drive is running and holds this database.")
-        console.error("Quit pCloud Drive, then run this again.\n")
-        process.exit(1)
-      }
-
-      const { backup, removed } = applyClearTasks(options.db, syncid)
-      console.log(`✓ Cleared ${removed} queued operation(s)`)
-      console.log(`  Backup: ${shortenHome(backup)}`)
-      console.log(
-        "  Start pCloud Drive again to confirm the warning is gone.\n",
+      const cleared = await withDaemonStopped(options.db, options.yes, () =>
+        applyClearTasks(options.db, syncid),
       )
+      if (!cleared) process.exit(1)
+
+      ok(
+        `Cleared ${cleared.removed} queued operation${cleared.removed === 1 ? "" : "s"}`,
+      )
+      note(`Backup: ${shortenHome(cleared.backup)}`)
     } catch (error) {
       handleError(error)
     }
@@ -1534,7 +1597,7 @@ program
 
       const data = await api.downloadFile(meta.fileid)
       writeFileSync(target, Buffer.from(data))
-      console.log(`✓ ${path} → ${target} (${formatBytes(data.byteLength)})`)
+      ok(`${path} → ${target} (${formatBytes(data.byteLength)})`)
     } catch (error) {
       handleError(error)
     }
@@ -1828,7 +1891,7 @@ const applyIgnore = (
   const current = parseList(readSettings(dbPath)[key])
 
   if (sameSet(current, next)) {
-    console.log(`✓ ${key} already matches — nothing to do`)
+    ok(`${key} already matches — nothing to do`)
     return
   }
 

@@ -41,6 +41,93 @@ export const renderChanges = (entries: PCloudDiffEntry[]): void =>
 export const renderAccount = (user: PCloudUserInfo): void =>
   once(<AccountPanel user={user} />)
 
+// Shared output primitives. Every command prints through these so that colour
+// and glyph are decided in one place — and always together.
+//
+// Accessibility is the reason they are paired, not decoration: a green tick and
+// a red cross are the same shape to anyone who cannot separate the hues, and
+// colour is stripped entirely when output is piped or NO_COLOR is set. The
+// glyph and the wording therefore carry the meaning on their own, and the
+// colour only reinforces it. Nothing here may become colour-only.
+
+const say = (icon: string, color: string, message: string): void =>
+  once(
+    <Text>
+      <Text color={color} bold>
+        {`${icon} `}
+      </Text>
+      <Text>{message}</Text>
+    </Text>,
+  )
+
+/** A thing that happened. */
+export const ok = (message: string): void => say("✓", colors.success, message)
+
+/** A thing that did not happen, or will not. */
+export const fail = (message: string): void => say("✗", colors.error, message)
+
+/** A thing that happened but deserves a second look. */
+export const warn = (message: string): void => say("!", colors.warning, message)
+
+/** Context. Never a finding. */
+export const note = (message: string): void =>
+  once(<Text color={colors.muted}>{`  ${message}`}</Text>)
+
+export const heading = (title: string): void =>
+  once(
+    <Box marginTop={1}>
+      <Text bold color={colors.accent}>
+        {title}
+      </Text>
+    </Box>,
+  )
+
+/** A value worth copying — a link, a path, an id. Printed bare so it pipes. */
+export const value = (text: string): void => once(<Text>{text}</Text>)
+
+export type Field = { label: string; value: string }
+
+// The indent is its own box, outside the measured width. Folding it into the
+// width means the longest label fills the column exactly and welds itself to
+// the value — "Remote/Appdata", "Credentialsession token". Same trap as `fit`
+// in the list components, and this is the third place it has appeared: a
+// fixed-width column has to exceed its longest content, never equal it.
+export const fields = (rows: Field[]): void => {
+  const width = Math.max(...rows.map((row) => row.label.length)) + 2
+  once(
+    <Box flexDirection="column">
+      {rows.map((row) => (
+        <Box key={row.label}>
+          <Box width={2} flexShrink={0}>
+            <Text> </Text>
+          </Box>
+          <Box width={width} flexShrink={0}>
+            <Text color={colors.muted}>{row.label}</Text>
+          </Box>
+          <Text>{row.value}</Text>
+        </Box>
+      ))}
+    </Box>,
+  )
+}
+
+/**
+ * The shape every destructive command shares: what would happen, then either a
+ * dry-run notice or the result. Keeping it in one place is what stops one
+ * command growing an --apply flag and another quietly not having one.
+ */
+export const plan = (title: string, rows: Field[], footer: string[]): void => {
+  heading(title)
+  fields(rows)
+  once(
+    <Box flexDirection="column" marginTop={1}>
+      {footer.map((line) => (
+        <Text key={line} color={colors.muted}>{`  ${line}`}</Text>
+      ))}
+    </Box>,
+  )
+}
+
 export type DoctorFault = {
   area: string
   detail: string
