@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`pcloud doctor` leads with the verdict.** It printed twenty-one green ticks and buried the one real problem — a stuck sync pair — at the very bottom, in the same plain text as everything above it. It now opens with what is wrong and how to fix it, then a three-line summary, then the evidence. Passing endpoints are a count; `--verbose` lists them all.
 - doctor renders through a component rather than `console.log`, so it has colour and aligned columns like the rest of the CLI. Severity is a glyph as well as a colour, so nothing depends on hue alone.
 - **`list-rewind` is no longer flagged as a fault.** pCloud has never exposed a Rewind endpoint, `pcloud rewind` already reconstructs it from diff and revisions, and reporting it as a fire on every single run teaches you to ignore the glyph that matters. It is now listed under "Not offered by pCloud" as expected.
-- Stuck queue entries are listed with their local id. Two rows both reading `usage-kud.tsv` said nothing about each other; the id is what shows they are two different files rather than one listed twice.
+- Stuck queue entries are listed with their local id. Two rows both reading the same filename said nothing about each other; the id is what shows they are two different files rather than one listed twice.
 
 [0.19.0]: https://github.com/kud/pcloud-cli/compare/v0.18.0...v0.19.0
 

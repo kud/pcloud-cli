@@ -1360,7 +1360,7 @@ const describeDaemon = (
           glyph: critical ? ("bad" as const) : ("warn" as const),
           label: `    ${issue.detail}`,
         })),
-        // Two rows reading "usage-kud.tsv" say nothing about each other. The
+        // Two rows reading the same filename say nothing about each other. The
         // local id distinguishes them, and tells you they are two different
         // files rather than one listed twice.
         ...stranded.slice(0, 5).map((task) => ({
