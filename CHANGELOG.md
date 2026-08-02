@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-08-02
+
+### Added
+
+- **Screenshots in the README** — the five browser tabs, all captured from
+  `pcloud --mock`, so the page shows what the tool looks like without showing
+  anyone's drive.
+
+### Fixed
+
+- **The Shares row no longer runs off the edge.** Its columns summed to eighty
+  against a pane of roughly seventy-two, and the row truncates rather than
+  wrapping — so the permissions column rendered as `rwc-…` and the created date
+  never appeared at all. The widths are now named and held by a test.
+
+### Changed
+
+- The npm package ships `dist/`, the README and the licence, and no longer
+  carries the repository's images.
+
+## [1.2.1] - 2026-08-02
+
+### Fixed
+
+- **Dates in the browser were not dates.** The Files tab showed `Thu, 14 Ma` for
+  every row: the formatter took the first ten characters of the timestamp, which
+  is an ISO assumption applied to pCloud's RFC-1123 datetimes. Real accounts had
+  this too, not only `--mock`.
+- **The Shares tab truncated its created column** to `03…`, having tried to fit
+  a full timestamp into a column that could not hold one. It shows the date now;
+  the time of day a share was created has never been the interesting part.
+- **Trash disagreed with every other tab**, rendering `2026-07-25` beside
+  `25 Jul 2026` on the same screen. One formatter now serves all of them, and it
+  lives in `@kud/pcloud` where the other presentation helpers already were.
+- **`--mock` ran its change history backwards.** The fixture returned the diff
+  newest-first while pCloud returns it oldest-first, and every consumer reverses
+  what it gets — so the Rewind tab listed Tuesday above Friday.
+
 ## [1.2.0] - 2026-08-01
 
 ### Added
