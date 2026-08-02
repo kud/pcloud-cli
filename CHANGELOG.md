@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] - 2026-08-02
+
+### Fixed
+
+- **The `homepage` link on npm no longer 404s.** It pointed at a GitHub Pages
+  URL the project never had; the docs live at
+  [kud.io/projects/pcloud-cli](https://kud.io/projects/pcloud-cli).
+
 ## [1.2.3] - 2026-08-02
 
 ### Fixed
