@@ -23,6 +23,7 @@ import {
   applyRewind,
   pathResolver,
 } from "@kud/pcloud"
+import { tabsFor, type Mode } from "@kud/pcloud-ink"
 import {
   renderAccount,
   renderChanges,
@@ -92,6 +93,32 @@ const defaultApiServer =
 const pkg = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 ) as { version: string }
+
+// Dev mode reveals machine-facing affordances in --help. It never changes what
+// a flag does: cli-shot drives this CLI as a subprocess, and a --screen list
+// that only worked under the variable would fail deep inside a capture run,
+// where nothing in the error names the missing environment.
+const devMode = process.env.PCLOUD_DEV === "1"
+
+// browse.tsx supplies both providers on every path, so every tab exists here —
+// unlike a host that omits one and gets a shorter bar.
+const SCREENS = tabsFor({ sync: true, settings: true }).map((tab) => tab.value)
+
+const screenHelp = `Open on a named screen (${SCREENS.join(", ")})`
+
+// `--screen list` is the discovery half of the pair: a capture tool asks which
+// screens exist and shoots each one, instead of carrying a table of which
+// keystrokes reach which tab in this particular CLI.
+const resolveScreen = (value: string | undefined): Mode | undefined => {
+  if (value === undefined) return undefined
+  if (value === "list") {
+    console.log(SCREENS.join("\n"))
+    process.exit(0)
+  }
+  if ((SCREENS as readonly string[]).includes(value)) return value as Mode
+  console.error(`Unknown screen "${value}". Available: ${SCREENS.join(", ")}`)
+  process.exit(1)
+}
 
 program
   .name("pcloud-cli")
@@ -1811,6 +1838,11 @@ program
 program
   .command("browse")
   .description("Interactive file browser")
+  .option(
+    "--screen <name>",
+    devMode ? `${screenHelp}, or "list" to print them` : screenHelp,
+  )
+  .option("--mock", "Explore sample data, without an account")
   .action(async () => {
     // Checked here rather than left to the browser component: that check runs
     // inside the render, by which point the alternate screen is up, so its error
@@ -1818,7 +1850,7 @@ program
     // to exit silently. The message only survives if it precedes the switch.
     requireStoredAuth()
     const { startBrowse } = await import("./browse.js")
-    await startBrowse()
+    await startBrowse(false, screen)
   })
 
 // pCloud's client settings live in this machine's own database rather than in
@@ -2034,13 +2066,32 @@ ignoreWriteOptions(
 // Checked here rather than declared as a commander option because it applies
 // to the bare invocation, which commander never sees.
 const mock = process.argv.includes("--mock")
-const invokedBare = process.argv.filter((a) => a !== "--mock").length <= 2
+
+// Read from argv rather than declared as a commander option, for the same
+// reason --mock is: an option declared on `browse` is invisible to the bare
+// invocation, which is the form both of these are most used in.
+const screenIndex = process.argv.indexOf("--screen")
+const screen = resolveScreen(
+  screenIndex === -1 ? undefined : process.argv[screenIndex + 1],
+)
+
+// --screen takes a value, so both the flag and the name that follows it have to
+// be discounted before what is left can be called bare. Counting only the flag
+// would send `pcloud --screen sync` down the subcommand path, where commander
+// would reject "sync" as an unknown command.
+const invokedBare =
+  process.argv.filter(
+    (arg, i) =>
+      arg !== "--mock" &&
+      arg !== "--screen" &&
+      process.argv[i - 1] !== "--screen",
+  ).length <= 2
 
 if (invokedBare) {
   // No credential needed in mock mode — that is most of the point.
   if (!mock) requireStoredAuth()
   const { startBrowse } = await import("./browse.js")
-  await startBrowse(mock)
+  await startBrowse(mock, screen)
 } else {
   program.parse()
 }

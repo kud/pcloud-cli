@@ -18,7 +18,7 @@ const RENDER_REACHED = /ink-picture|TerminalInfo|at async/
 // empty directory is what makes "logged out" deterministic. cwd goes there too:
 // cli.ts calls dotenv.config(), and a .env in the repo root would otherwise hand
 // the subprocess the very credentials this test is trying to withhold.
-const runBrowseLoggedOut = () => {
+const runLoggedOut = (...args: string[]) => {
   const home = mkdtempSync(join(tmpdir(), "pcloud-cli-home-"))
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: home }
   delete env.PCLOUD_AUTH
@@ -27,7 +27,7 @@ const runBrowseLoggedOut = () => {
   delete env.PCLOUD_CLIENT_SECRET
 
   try {
-    return spawnSync(TSX, [CLI, "browse"], {
+    return spawnSync(TSX, [CLI, ...args], {
       cwd: home,
       env,
       encoding: "utf8",
@@ -40,14 +40,49 @@ const runBrowseLoggedOut = () => {
 
 describe("browse without credentials", () => {
   it("exits non-zero instead of opening the browser", () => {
-    expect(runBrowseLoggedOut().status).toBe(1)
+    expect(runLoggedOut("browse").status).toBe(1)
   })
 
   it("says how to authenticate", () => {
-    expect(runBrowseLoggedOut().stderr).toMatch(/Not authenticated/)
+    expect(runLoggedOut("browse").stderr).toMatch(/Not authenticated/)
   })
 
   it("refuses before mounting the browser, not from inside it", () => {
-    expect(runBrowseLoggedOut().stderr).not.toMatch(RENDER_REACHED)
+    expect(runLoggedOut("browse").stderr).not.toMatch(RENDER_REACHED)
+  })
+})
+
+describe("--screen", () => {
+  // A capture tool reads this to know which screens exist, so it has to answer
+  // without a credential: enumerating tabs needs no account, and demanding one
+  // would make taking screenshots require a login.
+  it("lists the screens without authenticating", () => {
+    const run = runLoggedOut("--screen", "list")
+    expect(run.status).toBe(0)
+    expect(run.stdout.trim().split("\n")).toEqual([
+      "files",
+      "rewind",
+      "trash",
+      "shares",
+      "sync",
+      "settings",
+    ])
+  })
+
+  it("rejects an unknown screen with the names that would have worked", () => {
+    const run = runLoggedOut("--screen", "nope")
+    expect(run.status).toBe(1)
+    expect(run.stderr).toMatch(/Unknown screen "nope"/)
+    expect(run.stderr).toMatch(/files, rewind, trash, shares, sync, settings/)
+  })
+
+  // --screen takes a value, so the name after it must not be counted towards
+  // deciding this is a subcommand invocation. Discounting only the flag sent
+  // `pcloud --screen sync` into commander, which has no `sync` command and
+  // failed with an error naming neither the flag nor the real problem.
+  it("still reads as a bare invocation when a screen is named", () => {
+    const run = runLoggedOut("--screen", "sync")
+    expect(run.stderr).toMatch(/Not authenticated/)
+    expect(run.stderr).not.toMatch(/unknown command/i)
   })
 })

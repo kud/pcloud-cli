@@ -1,12 +1,9 @@
 import React from "react"
 import { render } from "ink"
-import {
-  createMockAPI,
-  mockSettings,
-  mockSyncPairs,
-} from "@kud/pcloud"
+import { createMockAPI, mockSettings, mockSyncPairs } from "@kud/pcloud"
 import {
   PCloudBrowser,
+  type Mode,
   type SettingsView,
   type SyncPairView,
 } from "@kud/pcloud-ink"
@@ -70,7 +67,10 @@ const writeIgnoreRules = (next: SettingsView): void => {
 // settings. Half-mocking would be worse than not offering it: a screenshot
 // showing invented files beside your real sync folders is the one outcome this
 // exists to prevent.
-export const startBrowse = async (mock = false): Promise<void> => {
+export const startBrowse = async (
+  mock = false,
+  screen?: Mode,
+): Promise<void> => {
   const { unmount, waitUntilExit } = render(
     mock ? (
       <PCloudBrowser
@@ -78,12 +78,14 @@ export const startBrowse = async (mock = false): Promise<void> => {
         api={createMockAPI()}
         sync={mockSyncPairs}
         settings={{ read: mockSettings, write: () => {} }}
+        initialScreen={screen}
       />
     ) : (
       <PCloudBrowser
         onExit={() => unmount()}
         sync={readSyncPairs}
         settings={{ read: readIgnoreRules, write: writeIgnoreRules }}
+        initialScreen={screen}
       />
     ),
     { alternateScreen: true },
