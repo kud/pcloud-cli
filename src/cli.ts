@@ -1799,7 +1799,8 @@ program
   .description("Download a file to the local filesystem")
   .argument("<path>", "Remote file path (e.g. /notes.md)")
   .argument("[dest]", "Local destination (defaults to the file's own name)")
-  .action(async (path: string, dest: string | undefined) => {
+  .option("--json", "Output raw JSON")
+  .action(async (path: string, dest: string | undefined, options) => {
     try {
       const api = await getAuthenticatedAPI()
       const stat = await api.stat(path)
@@ -1822,7 +1823,9 @@ program
 
       const data = await api.downloadFile(meta.fileid)
       writeFileSync(target, Buffer.from(data))
-      ok(`${path} → ${target} (${formatBytes(data.byteLength)})`)
+      emit(options, { source: path, target, bytes: data.byteLength }, () =>
+        ok(`${path} → ${target} (${formatBytes(data.byteLength)})`),
+      )
     } catch (error) {
       handleError(error)
     }
@@ -1833,7 +1836,8 @@ program
   .description("Upload a local file to a pCloud folder")
   .argument("<local>", "Local file to upload")
   .argument("<folder>", "Remote folder path (e.g. /Documents)")
-  .action(async (local: string, folder: string) => {
+  .option("--json", "Output raw JSON")
+  .action(async (local: string, folder: string, options) => {
     try {
       if (!existsSync(local)) {
         console.error(`Error: no such file: ${local}`)
@@ -1854,8 +1858,17 @@ program
       const response = await api.uploadFile(folderid, name, contents)
       assertSuccess(response.result, response.error)
 
-      console.log(
-        `✓ ${local} → ${folder}/${name} (${formatBytes(contents.byteLength)})`,
+      emit(
+        options,
+        {
+          source: local,
+          target: `${folder}/${name}`,
+          bytes: contents.byteLength,
+        },
+        () =>
+          console.log(
+            `✓ ${local} → ${folder}/${name} (${formatBytes(contents.byteLength)})`,
+          ),
       )
     } catch (error) {
       handleError(error)
