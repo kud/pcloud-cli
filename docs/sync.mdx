@@ -19,14 +19,27 @@ pcloud sync add Memory          # dry run
 pcloud sync add Memory --apply
 ```
 
-Creates the remote folder, the local folder, and the `syncfolder` row pairing
-them — the three steps that otherwise mean the CLI, Finder, and the app's
-preferences pane.
+Creates the remote folder and the local folder, then tells you the two paths to
+pair in pCloud Drive → Sync. It does the halves that are unambiguous and hands
+you the one that is not.
 
-Only the `syncfolder` row is written. `syncedfolder`, `localfolder` and
-`localfile` are the daemon's own scan index; it derives them when it next
-starts, and seeding them by hand would be inventing state its scanner is about
-to compute.
+### Why it does not create the pair itself
+
+Because it was tried, and it fails in the worst available way.
+
+Inserting a row into `syncfolder` directly — with `folderid`, `inode` and
+`deviceid` all copied correctly from working pairs — **is accepted by the
+daemon**. It watches the folder and indexes new files into `localfile`. But
+`syncedfolder` and `localfolder` stay at `0`, where a working pair carries
+dozens each. The daemon ends up holding a file it knows about and no remote
+folder to put it in, so nothing uploads.
+
+Worse, `pcloud sync` reports the pair **healthy** throughout: its checks look
+for an orphaned `folderid`, not for an index the daemon never built. A sync that
+will not start announces itself; this one reports fine indefinitely while moving
+nothing.
+
+pCloud Drive builds that index when it creates a pair, so pairing is left to it.
 
 ### What it does not do
 
@@ -60,11 +73,11 @@ behind:
 | -------------- | ------------------------------------------------------------------------- |
 | Duplicate pair | The local folder is already synced                                        |
 | Nesting        | pCloud syncs pairs independently — an overlap uploads the same file twice |
-| Remote paired  | That cloud folder already belongs to another pair                         |
 | Root missing   | The derived root does not exist on disk                                   |
 
-`--apply` backs up `data.db`, refuses while pCloud Drive is open, and offers to
-quit and restart it — the same contract as `prune` and `settings`.
+Unlike `prune` and `settings`, `add` never opens `data.db` for writing, so it
+needs no backup, no daemon guard and no `--yes`. It reads the sync table to
+derive the root and check for conflicts, and writes only to the filesystem.
 
 ## 📋 Show sync pairs
 

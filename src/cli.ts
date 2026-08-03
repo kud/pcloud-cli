@@ -48,9 +48,7 @@ import { resolveFileId, resolveFolderId } from "./lib/refs.js"
 import {
   PCLOUD_DB,
   applyClearTasks,
-  applyAdd,
   applyPrune,
-  planAdd,
   syncRoot,
   daemonRunning,
   databaseLocked,
@@ -1635,14 +1633,13 @@ sync
 
 sync
   .command("add")
-  .description("Create a folder on both sides and pair them for sync")
+  .description("Create a folder on both sides, ready to pair in pCloud Drive")
   .argument("<name>", "Folder name, created under the sync root on both sides")
   .option(
     "--root <path>",
     "Local sync root (else $PCLOUD_SYNC_ROOT, else inferred from existing pairs)",
   )
   .option("--apply", "Perform the change (default is a dry run)")
-  .option("--yes", "Do not ask before quitting pCloud Drive")
   .option("--db <path>", "Operate on a different database file", PCLOUD_DB)
   .action(async (name: string, options) => {
     try {
@@ -1690,7 +1687,7 @@ sync
           `Nested inside an existing pair (${shortenHome(nested.localpath)}) — pCloud syncs pairs independently and the overlap would upload twice`,
         )
 
-      console.log(`\nNew sync pair`)
+      console.log(`\nNew synced folder`)
       console.log(`  Local     ${shortenHome(localpath)}`)
       console.log(`  Remote    ${remotepath}\n`)
 
@@ -1700,8 +1697,7 @@ sync
           console.log(
             `  ${padEnd("local folder", 16)}${shortenHome(localpath)}`,
           )
-        console.log(`  ${padEnd("remote folder", 16)}${remotepath}`)
-        console.log(`  ${padEnd("sync pair", 16)}1 row in syncfolder\n`)
+        console.log(`  ${padEnd("remote folder", 16)}${remotepath}\n`)
         console.log("This was a dry run. Re-run with --apply to perform it.\n")
         return
       }
@@ -1709,32 +1705,17 @@ sync
       const api = await getAuthenticatedAPI()
       const created = await api.createFolder(remotepath)
       assertSuccess(created.result, created.error)
-      const folderid = Number(
-        (created.metadata as unknown as Record<string, unknown> | undefined)
-          ?.folderid,
-      )
-      if (!Number.isFinite(folderid) || folderid === 0)
-        throw new Error(`Could not resolve a folder id for ${remotepath}`)
 
       if (!existsSync(localpath)) mkdirSync(localpath, { recursive: true })
 
-      const fresh = snapshot(options.db)
-      const plan = (() => {
-        try {
-          return planAdd(fresh.db, localpath, remotepath, folderid)
-        } finally {
-          fresh.close()
-        }
-      })()
-
-      const added = await withDaemonStopped(options.db, options.yes, () =>
-        applyAdd(options.db, plan),
-      )
-      if (!added) process.exit(1)
-
-      ok(`Sync pair #${added.syncid} created`)
-      note(`Backup: ${shortenHome(added.backup)}`)
-      note("pCloud Drive scans the folder when it starts.")
+      ok(`${remotepath} and ${shortenHome(localpath)} are ready`)
+      heading("Pair them in pCloud Drive")
+      fields([
+        { label: "Open", value: "pCloud Drive → Sync → Add new sync" },
+        { label: "Local", value: shortenHome(localpath) },
+        { label: "Remote", value: remotepath },
+      ])
+      note("Then `pcloud sync` will report the pair like any other.")
     } catch (error) {
       handleError(error)
     }
