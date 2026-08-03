@@ -116,6 +116,25 @@ describe("readPairs", () => {
     f.dispose()
   })
 
+  // Pair 3 is the shape that passed every other check on 2026-08-03: a valid
+  // syncfolder row, a folderid that resolves, a local folder on disk — and no
+  // syncedfolder rows, so the daemon has nowhere to upload into. The pair moves
+  // nothing while looking entirely well.
+  it("flags a pair the daemon never indexed", () => {
+    const f = fixture()
+    expect(kindsFor(f.db, 3)).toContain("unindexed")
+    f.dispose()
+  })
+
+  // An orphaned pair has no remote folder to be indexed against, so reporting
+  // both would name one fault twice and point at the wrong remedy.
+  it("does not report unindexed on top of an orphaned pair", () => {
+    const f = fixture()
+    expect(kindsFor(f.db, 2)).toContain("orphaned")
+    expect(kindsFor(f.db, 2)).not.toContain("unindexed")
+    f.dispose()
+  })
+
   it("flags queued tasks that have no destination folder", () => {
     const f = fixture()
     expect(kindsFor(f.db, 2)).toContain("stuck")

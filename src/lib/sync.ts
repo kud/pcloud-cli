@@ -133,7 +133,12 @@ export const databaseLocked = (dbPath: string = PCLOUD_DB): boolean => {
 }
 
 export type IssueKind =
-  "orphaned" | "duplicate" | "local-missing" | "remote-missing" | "stuck"
+  | "orphaned"
+  | "duplicate"
+  | "local-missing"
+  | "remote-missing"
+  | "stuck"
+  | "unindexed"
 
 export type Issue = { kind: IssueKind; detail: string }
 
@@ -188,6 +193,7 @@ export const readPairs = (db: DatabaseSync): SyncPair[] => {
   const folders = countBySync(db, "localfolder")
   const files = countBySync(db, "localfile")
   const queued = countBySync(db, "task")
+  const indexed = countBySync(db, "syncedfolder")
 
   const raw = rows(
     db,
@@ -246,6 +252,28 @@ export const readPairs = (db: DatabaseSync): SyncPair[] => {
       issues.push({
         kind: "stuck",
         detail: `${stranded} queued operation${stranded === 1 ? "" : "s"} with no destination`,
+      })
+    }
+
+    // syncedfolder maps each local folder to its remote counterpart, and the
+    // pair root is itself a row — a healthy pair with 66 local folders carries
+    // 67. So zero means the daemon never built the index, not merely that the
+    // folder is empty, and the pair has nowhere to upload into.
+    //
+    // Worth its own kind because everything else here still looks right: the
+    // syncfolder row is present, the folderid resolves, the daemon may even be
+    // watching the folder and counting files into localfile. The pair reports
+    // healthy and moves nothing, which is how a hand-written row passed every
+    // check on 2026-08-03. Transient on a pair the daemon has not yet scanned,
+    // and saying so then is still true and still worth knowing.
+    if (
+      folderid !== null &&
+      resolved !== null &&
+      (indexed.get(id) ?? 0) === 0
+    ) {
+      issues.push({
+        kind: "unindexed",
+        detail: "no scan index — pCloud Drive has not built this pair",
       })
     }
 
@@ -481,6 +509,7 @@ const VERDICT_LABEL: Record<IssueKind, string> = {
   "local-missing": "sync pair(s) whose local folder no longer exists",
   "remote-missing": "sync pair(s) whose remote folder left the index",
   stuck: "sync pair(s) with queued operations that cannot complete",
+  unindexed: "sync pair(s) pCloud Drive never indexed — these move nothing",
 }
 
 export const verdicts = (pairs: SyncPair[]): SyncVerdict[] =>

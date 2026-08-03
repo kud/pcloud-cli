@@ -1252,7 +1252,7 @@ const HEALTH_GLYPH: Record<string, string> = {
 const shortenHome = (path: string): string =>
   path.startsWith(homedir()) ? `~${path.slice(homedir().length)}` : path
 
-const CRITICAL = new Set(["orphaned", "remote-missing", "stuck"])
+const CRITICAL = new Set(["orphaned", "remote-missing", "stuck", "unindexed"])
 
 const pairGlyph = (pair: SyncPair): string =>
   pair.issues.length === 0
