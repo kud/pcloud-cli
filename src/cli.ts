@@ -611,20 +611,27 @@ program
     }
   })
 
-program
-  .command("get-link")
-  .description("Get a download URL for a file")
-  .argument("<file>", "File path or id")
-  .action(async (file: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.getFileLink(await resolveFileId(api, file))
-      assertSuccess(response.result, response.error)
-      console.log(`https://${response.hosts[0]}${response.path}`)
-    } catch (error) {
-      handleError(error)
-    }
-  })
+// The bare default stays bare — `value()` exists so a link pipes without jq,
+// and wrapping one string in an object would make the common case worse. The
+// flag is here so a script can pass --json to any command without first
+// checking which ones happen to return a single value.
+jsonOption(
+  program
+    .command("get-link")
+    .description("Get a download URL for a file")
+    .argument("<file>", "File path or id")
+    .action(async (file: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.getFileLink(await resolveFileId(api, file))
+        assertSuccess(response.result, response.error)
+        const link = `https://${response.hosts[0]}${response.path}`
+        emit(options, { link }, () => console.log(link))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
 jsonOption(
   program
@@ -835,10 +842,11 @@ program
   .argument("<file>", "File path or id")
   .option("--expire <date>", "Expiry datetime (YYYY-MM-DD HH:MM:SS)")
   .option("--max-downloads <n>", "Maximum number of downloads")
+  .option("--json", "Output raw JSON")
   .action(
     async (
       file: string,
-      options: { expire?: string; maxDownloads?: string },
+      options: { expire?: string; maxDownloads?: string; json?: boolean },
     ) => {
       try {
         const api = await getAuthenticatedAPI()
@@ -850,7 +858,7 @@ program
             : undefined,
         )
         assertSuccess(response.result, response.error)
-        console.log(response.link)
+        emit(options, { link: response.link }, () => console.log(response.link))
       } catch (error) {
         handleError(error)
       }
@@ -862,19 +870,22 @@ program
   .description("Create a public link for a folder")
   .argument("<folder>", "Folder path or id")
   .option("--expire <date>", "Expiry datetime (YYYY-MM-DD HH:MM:SS)")
-  .action(async (folder: string, options: { expire?: string }) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.getFolderPublink(
-        await resolveFolderId(api, folder),
-        options.expire,
-      )
-      assertSuccess(response.result, response.error)
-      console.log(response.link)
-    } catch (error) {
-      handleError(error)
-    }
-  })
+  .option("--json", "Output raw JSON")
+  .action(
+    async (folder: string, options: { expire?: string; json?: boolean }) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.getFolderPublink(
+          await resolveFolderId(api, folder),
+          options.expire,
+        )
+        assertSuccess(response.result, response.error)
+        emit(options, { link: response.link }, () => console.log(response.link))
+      } catch (error) {
+        handleError(error)
+      }
+    },
+  )
 
 jsonOption(
   program
@@ -915,10 +926,11 @@ program
   .argument("<files...>", "File paths or ids to include in the ZIP")
   .option("--folder <folder...>", "Folder paths or ids to include")
   .option("--filename <name>", "Name for the ZIP file")
+  .option("--json", "Output raw JSON")
   .action(
     async (
       files: string[],
-      options: { folder?: string[]; filename?: string },
+      options: { folder?: string[]; filename?: string; json?: boolean },
     ) => {
       try {
         const api = await getAuthenticatedAPI()
@@ -931,7 +943,8 @@ program
           options.filename,
         )
         assertSuccess(response.result, response.error)
-        console.log(`https://${response.hosts[0]}${response.path}`)
+        const link = `https://${response.hosts[0]}${response.path}`
+        emit(options, { link }, () => console.log(link))
       } catch (error) {
         handleError(error)
       }

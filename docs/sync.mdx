@@ -28,6 +28,14 @@ Only the `syncfolder` row is written. `syncedfolder`, `localfolder` and
 starts, and seeding them by hand would be inventing state its scanner is about
 to compute.
 
+### What it does not do
+
+A pCloud sync pair can bind **any** local folder to **any** remote folder — the
+two need not share a name, and nothing requires them to sit under a common
+parent. `add` deliberately covers only the mirrored case, `<root>/name ↔ /name`,
+because that is the layout worth a shortcut. Pair anything else in pCloud
+Drive's preferences, then `pcloud sync` will report on it like any other.
+
 ### Where the local folder goes
 
 Four rungs, most specific first:
