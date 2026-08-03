@@ -8,7 +8,7 @@ import {
   statSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 export const PCLOUD_DB = join(homedir(), ".pcloud", "data.db")
 
@@ -380,6 +380,122 @@ export const applyPrune = (
       throw error
     }
     return { backup, removed: plan.total }
+  } finally {
+    db.close()
+  }
+}
+
+export type AddPlan = {
+  localpath: string
+  remotepath: string
+  folderid: number
+  inode: number
+  synctype: number
+  flags: number
+  deviceid: number
+}
+
+// synctype, flags and deviceid are undocumented, so they are copied from a pair
+// pCloud Drive itself created rather than hardcoded. A row indistinguishable
+// from one the app wrote is the only available definition of "correct" here,
+// and a constant guessed today is a constant wrong after their next release.
+const pairDefaults = (
+  db: DatabaseSync,
+): { synctype: number; flags: number; deviceid: number } => {
+  const row = db
+    .prepare("SELECT synctype, flags, deviceid FROM syncfolder LIMIT 1")
+    .get() as Row | undefined
+  return {
+    synctype: num(row?.synctype ?? 3),
+    flags: num(row?.flags ?? 1),
+    deviceid: num(row?.deviceid ?? 1),
+  }
+}
+
+// Derived, never stored. A setting recording where synced folders live can drift
+// from the pairs it claims to describe; the pairs cannot drift from themselves.
+// Returns null when they disagree, so the caller asks rather than guesses.
+export const syncRoot = (db: DatabaseSync): string | null => {
+  const paths = rows(db, "SELECT localpath FROM syncfolder")
+    .map((row) => String(row.localpath ?? ""))
+    .filter(Boolean)
+  if (paths.length === 0) return null
+  const parents = new Set(paths.map((path) => dirname(path)))
+  return parents.size === 1 ? [...parents][0] : null
+}
+
+export const planAdd = (
+  db: DatabaseSync,
+  localpath: string,
+  remotepath: string,
+  folderid: number,
+): AddPlan => {
+  if (!existsSync(localpath))
+    throw new Error(`Local folder does not exist: ${localpath}`)
+
+  const existing = readPairs(db)
+  if (existing.some((pair) => pair.localpath === localpath))
+    throw new Error(`Already a sync pair: ${localpath}`)
+
+  // pCloud syncs each pair independently, so an overlap uploads the same file
+  // under two pairs and leaves each believing it owns the result.
+  const nested = existing.find(
+    (pair) =>
+      localpath.startsWith(`${pair.localpath}/`) ||
+      pair.localpath.startsWith(`${localpath}/`),
+  )
+  if (nested)
+    throw new Error(
+      `Nested inside an existing pair (${nested.localpath}) — pCloud syncs pairs independently and the overlap would upload twice`,
+    )
+
+  if (existing.some((pair) => pair.folderid === folderid))
+    throw new Error(`Remote folder is already paired: ${remotepath}`)
+
+  return {
+    localpath,
+    remotepath,
+    folderid,
+    inode: Number(statSync(localpath).ino),
+    ...pairDefaults(db),
+  }
+}
+
+// The inverse of applyPrune, and deliberately narrower: one row in syncfolder
+// and nothing else. syncedfolder, localfolder and localfile are the daemon's
+// own scan index — seeding them by hand would be inventing state its scanner is
+// about to derive, and a wrong guess there is exactly the orphaned-pair fault
+// `pcloud sync` exists to report.
+export const applyAdd = (
+  dbPath: string,
+  plan: AddPlan,
+  stamp: Date = new Date(),
+): { backup: string; syncid: number } => {
+  const backup = backupPath(dbPath, stamp)
+  copyFileSync(dbPath, backup)
+
+  const db = new DatabaseSync(dbPath, OPEN)
+  try {
+    db.exec("BEGIN")
+    try {
+      const result = db
+        .prepare(
+          "INSERT INTO syncfolder (folderid, localpath, synctype, flags, inode, deviceid) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          plan.folderid,
+          plan.localpath,
+          plan.synctype,
+          plan.flags,
+          plan.inode,
+          plan.deviceid,
+        )
+      db.exec("COMMIT")
+      return { backup, syncid: Number(result.lastInsertRowid) }
+    } catch (error) {
+      db.exec("ROLLBACK")
+      throw error
+    }
   } finally {
     db.close()
   }

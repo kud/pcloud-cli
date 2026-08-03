@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, existsSync } from "fs"
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs"
 import { homedir } from "os"
-import { basename } from "path"
+import { basename, join } from "path"
 import readline from "readline"
 import { Writable } from "stream"
 import { Command } from "commander"
@@ -48,7 +48,10 @@ import { resolveFileId, resolveFolderId } from "./lib/refs.js"
 import {
   PCLOUD_DB,
   applyClearTasks,
+  applyAdd,
   applyPrune,
+  planAdd,
+  syncRoot,
   daemonRunning,
   databaseLocked,
   planClearTasks,
@@ -407,50 +410,102 @@ program
     ok("Local credentials removed")
   })
 
-program
-  .command("whoami")
-  .description("Show account information")
-  .action(async () => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.userInfo()
-      assertSuccess(response.result, response.error)
-      renderAccount(response)
-    } catch (error) {
-      handleError(error)
-    }
-  })
+// Every data-returning command renders by default and emits the raw payload
+// under --json. Registered per command rather than as one option on `program`:
+// enablePositionalOptions() binds an option to the subcommand it follows, so a
+// program-level flag would only ever parse as `pcloud --json ls` — the opposite
+// end of the line from where anyone types it.
+const jsonOption = (cmd: Command): Command =>
+  cmd.option("--json", "Output raw JSON")
 
-program
-  .command("ls")
-  .description("List folder contents")
-  .argument("[path]", "Folder path", "/")
-  .action(async (path: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.listFolder(path)
-      assertSuccess(response.result, response.error)
+const emit = <T>(
+  options: { json?: boolean },
+  data: T,
+  render: () => void,
+): void => {
+  if (options.json) console.log(JSON.stringify(data, null, 2))
+  else render()
+}
 
-      renderFileList(response.metadata?.contents ?? [])
-    } catch (error) {
-      handleError(error)
-    }
-  })
+// The rendered half of `stat`. The API returns twelve keys, several of which
+// (thumb, comments, icon) answer questions nobody asked of a metadata command —
+// they stay reachable under --json rather than crowding the default view.
+const renderStat = (meta: Record<string, unknown>): void => {
+  const isFolder = Boolean(meta.isfolder)
+  const rows = [
+    {
+      label: "Type",
+      value: isFolder ? "folder" : String(meta.contenttype ?? "file"),
+    },
+    { label: "ID", value: String(meta.id ?? "—") },
+  ]
+  if (!isFolder && meta.size !== undefined)
+    rows.push({
+      label: "Size",
+      value: `${Number(meta.size).toLocaleString()} bytes`,
+    })
+  rows.push(
+    { label: "Created", value: String(meta.created ?? "—") },
+    { label: "Modified", value: String(meta.modified ?? "—") },
+    { label: "Owner", value: meta.ismine ? "you" : "shared with you" },
+    { label: "Shared", value: meta.isshared ? "yes" : "no" },
+  )
+  heading(String(meta.name ?? "—"))
+  fields(rows)
+}
 
-program
-  .command("stat")
-  .description("Show file or folder metadata")
-  .argument("<path>", "File or folder path")
-  .action(async (path: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.stat(path)
-      assertSuccess(response.result, response.error)
-      console.log(JSON.stringify(response.metadata, null, 2))
-    } catch (error) {
-      handleError(error)
-    }
-  })
+jsonOption(
+  program
+    .command("whoami")
+    .description("Show account information")
+    .action(async (options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.userInfo()
+        assertSuccess(response.result, response.error)
+        emit(options, response, () => renderAccount(response))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
+
+jsonOption(
+  program
+    .command("ls")
+    .description("List folder contents")
+    .argument("[path]", "Folder path", "/")
+    .action(async (path: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.listFolder(path)
+        assertSuccess(response.result, response.error)
+
+        const contents = response.metadata?.contents ?? []
+        emit(options, contents, () => renderFileList(contents))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
+
+jsonOption(
+  program
+    .command("stat")
+    .description("Show file or folder metadata")
+    .argument("<path>", "File or folder path")
+    .action(async (path: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.stat(path)
+        assertSuccess(response.result, response.error)
+        const meta = response.metadata as unknown as Record<string, unknown>
+        emit(options, response.metadata, () => renderStat(meta))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
 program
   .command("mkdir")
@@ -571,38 +626,50 @@ program
     }
   })
 
-program
-  .command("checksum")
-  .description("Print SHA256, SHA1 and MD5 checksums for a file")
-  .argument("<file>", "File path or id")
-  .action(async (file: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.checksumFile(await resolveFileId(api, file))
-      assertSuccess(response.result, response.error)
-      console.log(`SHA256  ${response.sha256}`)
-      console.log(`SHA1    ${response.sha1}`)
-      console.log(`MD5     ${response.md5}`)
-    } catch (error) {
-      handleError(error)
-    }
-  })
+jsonOption(
+  program
+    .command("checksum")
+    .description("Print SHA256, SHA1 and MD5 checksums for a file")
+    .argument("<file>", "File path or id")
+    .action(async (file: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.checksumFile(await resolveFileId(api, file))
+        assertSuccess(response.result, response.error)
+        const sums = {
+          sha256: response.sha256,
+          sha1: response.sha1,
+          md5: response.md5,
+        }
+        emit(options, sums, () => {
+          console.log(`SHA256  ${response.sha256}`)
+          console.log(`SHA1    ${response.sha1}`)
+          console.log(`MD5     ${response.md5}`)
+        })
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
-program
-  .command("list-revisions")
-  .description("List revisions for a file")
-  .argument("<file>", "File path or id")
-  .action(async (file: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.listRevisions(await resolveFileId(api, file))
-      assertSuccess(response.result, response.error)
+jsonOption(
+  program
+    .command("list-revisions")
+    .description("List revisions for a file")
+    .argument("<file>", "File path or id")
+    .action(async (file: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.listRevisions(await resolveFileId(api, file))
+        assertSuccess(response.result, response.error)
 
-      renderRevisions(response.revisions ?? [])
-    } catch (error) {
-      handleError(error)
-    }
-  })
+        const revisions = response.revisions ?? []
+        emit(options, revisions, () => renderRevisions(revisions))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
 program
   .command("revert-revision")
@@ -626,7 +693,8 @@ program
 program
   .command("list-shares")
   .description("List all active folder shares")
-  .action(async () => {
+  .option("--json", "Output raw JSON")
+  .action(async (options) => {
     try {
       const api = await getAuthenticatedAPI()
       const response = await api.listShares()
@@ -634,6 +702,14 @@ program
 
       const shares = response.shares ?? {}
       const requests = response.requests ?? {}
+
+      // Emitted before the sections rather than through `emit`: this command
+      // renders four heterogeneous tables and an empty-state, so the JSON half
+      // is a single payload where the rendered half is not a single call.
+      if (options.json) {
+        console.log(JSON.stringify({ shares, requests }, null, 2))
+        return
+      }
       const sections: [string, "outgoing" | "incoming", PCloudShareItem[]][] = [
         ["Shared with others", "outgoing", shares.outgoing ?? []],
         ["Shared with you", "incoming", shares.incoming ?? []],
@@ -800,20 +876,23 @@ program
     }
   })
 
-program
-  .command("list-publinks")
-  .description("List all active public links")
-  .action(async () => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.listPublinks()
-      assertSuccess(response.result, response.error)
+jsonOption(
+  program
+    .command("list-publinks")
+    .description("List all active public links")
+    .action(async (options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.listPublinks()
+        assertSuccess(response.result, response.error)
 
-      renderPublinks(response.publinks ?? [])
-    } catch (error) {
-      handleError(error)
-    }
-  })
+        const publinks = response.publinks ?? []
+        emit(options, publinks, () => renderPublinks(publinks))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
 program
   .command("delete-publink")
@@ -869,7 +948,8 @@ program
   .description(
     "List files in trash (⚠ requires session auth — limited with OAuth)",
   )
-  .action(async () => {
+  .option("--json", "Output raw JSON")
+  .action(async (options) => {
     try {
       const api = await getAuthenticatedAPI()
       const response = await api.listTrash()
@@ -880,18 +960,20 @@ program
       assertSuccess(response.result, response.error)
 
       const items = (response.contents ?? []) as any[]
-      if (items.length === 0) {
-        console.log("Trash is empty")
-        return
-      }
+      emit(options, items, () => {
+        if (items.length === 0) {
+          console.log("Trash is empty")
+          return
+        }
 
-      // Printing fileid alone left every folder showing "-", and trash is
-      // mostly folders — so the id needed to restore something was exactly the
-      // one the listing would not show. TrashList picks whichever exists.
-      renderTrash(items)
+        // Printing fileid alone left every folder showing "-", and trash is
+        // mostly folders — so the id needed to restore something was exactly the
+        // one the listing would not show. TrashList picks whichever exists.
+        renderTrash(items)
 
-      console.log(`\n${items.length} items. Restore with:\n`)
-      console.log("  pcloud restore-trash <ID> [--to /somewhere]\n")
+        console.log(`\n${items.length} items. Restore with:\n`)
+        console.log("  pcloud restore-trash <ID> [--to /somewhere]\n")
+      })
     } catch (error) {
       handleError(error)
     }
@@ -1533,6 +1615,113 @@ sync
 
       ok(`Removed ${pruned.removed} rows for sync pair #${syncid}`)
       note(`Backup: ${shortenHome(pruned.backup)}`)
+    } catch (error) {
+      handleError(error)
+    }
+  })
+
+sync
+  .command("add")
+  .description("Create a folder on both sides and pair them for sync")
+  .argument("<name>", "Folder name, created under the sync root on both sides")
+  .option(
+    "--root <path>",
+    "Local sync root (else $PCLOUD_SYNC_ROOT, else inferred from existing pairs)",
+  )
+  .option("--apply", "Perform the change (default is a dry run)")
+  .option("--yes", "Do not ask before quitting pCloud Drive")
+  .option("--db <path>", "Operate on a different database file", PCLOUD_DB)
+  .action(async (name: string, options) => {
+    try {
+      const snap = snapshot(options.db)
+      const { inferred, pairs } = (() => {
+        try {
+          return { inferred: syncRoot(snap.db), pairs: readPairs(snap.db) }
+        } finally {
+          snap.close()
+        }
+      })()
+
+      // Four rungs, most specific first. Inference covers the Dropbox-shaped
+      // setup where every pair sits under one folder; it abstains rather than
+      // guesses when they disagree, because a scattered layout is a legitimate
+      // way to use pCloud rather than a fault. --root and PCLOUD_SYNC_ROOT are
+      // how that user says where theirs is, and ~/pCloud is the client's own
+      // conventional name — a better default than refusing to act.
+      const root =
+        options.root ??
+        process.env.PCLOUD_SYNC_ROOT ??
+        inferred ??
+        join(homedir(), "pCloud")
+
+      if (!existsSync(root))
+        throw new Error(
+          `Sync root does not exist: ${shortenHome(root)}\n` +
+            "  Pass --root <path>, or set PCLOUD_SYNC_ROOT.",
+        )
+
+      const localpath = join(root, name)
+      const remotepath = `/${name}`
+
+      // Cheap guards run before anything is created, so a dry run reports the
+      // conflict rather than leaving two folders behind on the way to failing.
+      if (pairs.some((pair) => pair.localpath === localpath))
+        throw new Error(`Already a sync pair: ${shortenHome(localpath)}`)
+      const nested = pairs.find(
+        (pair) =>
+          localpath.startsWith(`${pair.localpath}/`) ||
+          pair.localpath.startsWith(`${localpath}/`),
+      )
+      if (nested)
+        throw new Error(
+          `Nested inside an existing pair (${shortenHome(nested.localpath)}) — pCloud syncs pairs independently and the overlap would upload twice`,
+        )
+
+      console.log(`\nNew sync pair`)
+      console.log(`  Local     ${shortenHome(localpath)}`)
+      console.log(`  Remote    ${remotepath}\n`)
+
+      if (!options.apply) {
+        console.log("Would create:")
+        if (!existsSync(localpath))
+          console.log(
+            `  ${padEnd("local folder", 16)}${shortenHome(localpath)}`,
+          )
+        console.log(`  ${padEnd("remote folder", 16)}${remotepath}`)
+        console.log(`  ${padEnd("sync pair", 16)}1 row in syncfolder\n`)
+        console.log("This was a dry run. Re-run with --apply to perform it.\n")
+        return
+      }
+
+      const api = await getAuthenticatedAPI()
+      const created = await api.createFolder(remotepath)
+      assertSuccess(created.result, created.error)
+      const folderid = Number(
+        (created.metadata as unknown as Record<string, unknown> | undefined)
+          ?.folderid,
+      )
+      if (!Number.isFinite(folderid) || folderid === 0)
+        throw new Error(`Could not resolve a folder id for ${remotepath}`)
+
+      if (!existsSync(localpath)) mkdirSync(localpath, { recursive: true })
+
+      const fresh = snapshot(options.db)
+      const plan = (() => {
+        try {
+          return planAdd(fresh.db, localpath, remotepath, folderid)
+        } finally {
+          fresh.close()
+        }
+      })()
+
+      const added = await withDaemonStopped(options.db, options.yes, () =>
+        applyAdd(options.db, plan),
+      )
+      if (!added) process.exit(1)
+
+      ok(`Sync pair #${added.syncid} created`)
+      note(`Backup: ${shortenHome(added.backup)}`)
+      note("pCloud Drive scans the folder when it starts.")
     } catch (error) {
       handleError(error)
     }

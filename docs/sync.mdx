@@ -12,6 +12,52 @@ see. The symptom you actually get is a dialog reading _"pCloud doesn't have
 permissions to upload this item"_ against a folder shown as `/` — which is
 neither a permissions problem nor a folder called `/`.
 
+## ➕ Add a sync pair
+
+```bash
+pcloud sync add Memory          # dry run
+pcloud sync add Memory --apply
+```
+
+Creates the remote folder, the local folder, and the `syncfolder` row pairing
+them — the three steps that otherwise mean the CLI, Finder, and the app's
+preferences pane.
+
+Only the `syncfolder` row is written. `syncedfolder`, `localfolder` and
+`localfile` are the daemon's own scan index; it derives them when it next
+starts, and seeding them by hand would be inventing state its scanner is about
+to compute.
+
+### Where the local folder goes
+
+Four rungs, most specific first:
+
+| Rung                         | Source                                    |
+| ---------------------------- | ----------------------------------------- |
+| `--root <path>`              | This run only                             |
+| `PCLOUD_SYNC_ROOT`           | This machine                              |
+| Inferred from existing pairs | The parent every current pair shares      |
+| `~/pCloud`                   | The client's own conventional folder name |
+
+Inference abstains when existing pairs live under different parents — a
+scattered layout is a legitimate way to use pCloud, not a fault, so it falls
+through to the default rather than picking a winner.
+
+### Guards
+
+`add` refuses before creating anything, so a rejected run leaves no folders
+behind:
+
+| Check          | Why                                                                       |
+| -------------- | ------------------------------------------------------------------------- |
+| Duplicate pair | The local folder is already synced                                        |
+| Nesting        | pCloud syncs pairs independently — an overlap uploads the same file twice |
+| Remote paired  | That cloud folder already belongs to another pair                         |
+| Root missing   | The derived root does not exist on disk                                   |
+
+`--apply` backs up `data.db`, refuses while pCloud Drive is open, and offers to
+quit and restart it — the same contract as `prune` and `settings`.
+
 ## 📋 Show sync pairs
 
 ```bash
