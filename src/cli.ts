@@ -1,9 +1,16 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs"
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  realpathSync,
+} from "fs"
 import { homedir } from "os"
 import { basename, join } from "path"
 import readline from "readline"
 import { Writable } from "stream"
+import { fileURLToPath } from "url"
 import { Command } from "commander"
 import dotenv from "dotenv"
 import {
@@ -76,7 +83,7 @@ import {
 
 dotenv.config({ quiet: true })
 
-const program = new Command()
+export const program = new Command()
 
 // Options bind to the subcommand they follow, rather than being hoisted to the
 // nearest ancestor that happens to declare the same name. Without this,
@@ -286,6 +293,23 @@ const runSessionLogin = async (): Promise<void> => {
   console.log("Try: pcloud list-trash\n")
 }
 
+// Every data-returning command renders by default and emits the raw payload
+// under --json. Registered per command rather than as one option on `program`:
+// enablePositionalOptions() binds an option to the subcommand it follows, so a
+// program-level flag would only ever parse as `pcloud --json ls` — the opposite
+// end of the line from where anyone types it.
+const jsonOption = (cmd: Command): Command =>
+  cmd.option("--json", "Output raw JSON")
+
+const emit = <T>(
+  options: { json?: boolean },
+  data: T,
+  render: () => void,
+): void => {
+  if (options.json) console.log(JSON.stringify(data, null, 2))
+  else render()
+}
+
 program
   .command("login")
   .description("Set up authentication with pCloud")
@@ -373,57 +397,53 @@ program
     }
   })
 
-program
-  .command("logout")
-  .description("Revoke the session token and remove stored credentials")
-  .action(async () => {
-    const stored = tokenStore.load()
-    if (!stored) {
-      console.log("No stored credentials found")
-      return
-    }
-
-    // Deleting the local file leaves a session token live on pCloud until it
-    // expires, so revoke first and only report success for what actually happened.
-    if (stored.auth) {
-      try {
-        const api = await getAuthenticatedAPI()
-        const response = await api.logout()
-        console.log(
-          response.auth_deleted
-            ? "✓ Session token revoked on pCloud"
-            : "⚠ pCloud did not confirm revocation — check pcloud.com → Settings → Devices",
+// `revoked` is null when there was no session token to revoke — an OAuth
+// token has no logout endpoint — so a script can tell "not attempted" from
+// "attempted and unconfirmed" without parsing the warning.
+jsonOption(
+  program
+    .command("logout")
+    .description("Revoke the session token and remove stored credentials")
+    .action(async (options) => {
+      const stored = tokenStore.load()
+      if (!stored) {
+        emit(options, { revoked: null, removed: false }, () =>
+          console.log("No stored credentials found"),
         )
-      } catch (error) {
-        console.error(
-          `⚠ Could not reach pCloud to revoke the token: ${error instanceof Error ? error.message : error}`,
-        )
-        console.error(
-          "  The token may still be valid. Revoke it at pcloud.com.",
-        )
+        return
       }
-    }
 
-    tokenStore.delete()
-    ok("Local credentials removed")
-  })
+      // Deleting the local file leaves a session token live on pCloud until it
+      // expires, so revoke first and only report success for what actually happened.
+      let revoked: boolean | null = null
+      if (stored.auth) {
+        try {
+          const api = await getAuthenticatedAPI()
+          const response = await api.logout()
+          revoked = Boolean(response.auth_deleted)
+          if (!options.json)
+            console.log(
+              revoked
+                ? "✓ Session token revoked on pCloud"
+                : "⚠ pCloud did not confirm revocation — check pcloud.com → Settings → Devices",
+            )
+        } catch (error) {
+          revoked = false
+          console.error(
+            `⚠ Could not reach pCloud to revoke the token: ${error instanceof Error ? error.message : error}`,
+          )
+          console.error(
+            "  The token may still be valid. Revoke it at pcloud.com.",
+          )
+        }
+      }
 
-// Every data-returning command renders by default and emits the raw payload
-// under --json. Registered per command rather than as one option on `program`:
-// enablePositionalOptions() binds an option to the subcommand it follows, so a
-// program-level flag would only ever parse as `pcloud --json ls` — the opposite
-// end of the line from where anyone types it.
-const jsonOption = (cmd: Command): Command =>
-  cmd.option("--json", "Output raw JSON")
-
-const emit = <T>(
-  options: { json?: boolean },
-  data: T,
-  render: () => void,
-): void => {
-  if (options.json) console.log(JSON.stringify(data, null, 2))
-  else render()
-}
+      tokenStore.delete()
+      emit(options, { revoked, removed: true }, () =>
+        ok("Local credentials removed"),
+      )
+    }),
+)
 
 // The rendered half of `stat`. The API returns twelve keys, several of which
 // (thumb, comments, icon) answer questions nobody asked of a metadata command —
@@ -505,109 +525,130 @@ jsonOption(
     }),
 )
 
-program
-  .command("mkdir")
-  .description("Create a folder (no-op if it already exists)")
-  .argument("<path>", "Folder path to create")
-  .action(async (path: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.createFolder(path)
-      assertSuccess(response.result, response.error)
-      ok("Done")
-    } catch (error) {
-      handleError(error)
-    }
-  })
+jsonOption(
+  program
+    .command("mkdir")
+    .description("Create a folder (no-op if it already exists)")
+    .argument("<path>", "Folder path to create")
+    .action(async (path: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.createFolder(path)
+        assertSuccess(response.result, response.error)
+        emit(options, response.metadata, () => ok("Done"))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
-program
-  .command("rmdir")
-  .description("Recursively delete a folder and all its contents")
-  .argument("<folder>", "Folder path or id to delete")
-  .action(async (folder: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.deleteFolder(
-        await resolveFolderId(api, folder),
-      )
-      assertSuccess(response.result, response.error)
-      ok("Done")
-    } catch (error) {
-      handleError(error)
-    }
-  })
+jsonOption(
+  program
+    .command("rmdir")
+    .description("Recursively delete a folder and all its contents")
+    .argument("<folder>", "Folder path or id to delete")
+    .action(async (folder: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const folderid = await resolveFolderId(api, folder)
+        const response = (await api.deleteFolder(folderid)) as Awaited<
+          ReturnType<PCloudAPI["deleteFolder"]>
+        > & { deletedfiles?: number; deletedfolders?: number }
+        assertSuccess(response.result, response.error)
+        emit(
+          options,
+          {
+            folderid,
+            deletedfiles: response.deletedfiles,
+            deletedfolders: response.deletedfolders,
+          },
+          () => ok("Done"),
+        )
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
-program
-  .command("copy-file")
-  .description("Copy a file to a new path")
-  .argument("<file>", "File path or id to copy")
-  .argument("<topath>", "Destination path")
-  .action(async (file: string, topath: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.copyFile(
-        await resolveFileId(api, file),
-        topath,
-      )
-      assertSuccess(response.result, response.error)
-      ok("Done")
-    } catch (error) {
-      handleError(error)
-    }
-  })
+jsonOption(
+  program
+    .command("copy-file")
+    .description("Copy a file to a new path")
+    .argument("<file>", "File path or id to copy")
+    .argument("<topath>", "Destination path")
+    .action(async (file: string, topath: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.copyFile(
+          await resolveFileId(api, file),
+          topath,
+        )
+        assertSuccess(response.result, response.error)
+        emit(options, response.metadata, () => ok("Done"))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
-program
-  .command("move-file")
-  .description("Move a file to a new path")
-  .argument("<file>", "File path or id to move")
-  .argument("<topath>", "Destination path")
-  .action(async (file: string, topath: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.moveFile(
-        await resolveFileId(api, file),
-        topath,
-      )
-      assertSuccess(response.result, response.error)
-      ok("Done")
-    } catch (error) {
-      handleError(error)
-    }
-  })
+jsonOption(
+  program
+    .command("move-file")
+    .description("Move a file to a new path")
+    .argument("<file>", "File path or id to move")
+    .argument("<topath>", "Destination path")
+    .action(async (file: string, topath: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.moveFile(
+          await resolveFileId(api, file),
+          topath,
+        )
+        assertSuccess(response.result, response.error)
+        emit(options, response.metadata, () => ok("Done"))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
-program
-  .command("rename-file")
-  .description("Rename a file")
-  .argument("<file>", "File path or id to rename")
-  .argument("<toname>", "New file name")
-  .action(async (file: string, toname: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.renameFile(
-        await resolveFileId(api, file),
-        toname,
-      )
-      assertSuccess(response.result, response.error)
-      ok("Done")
-    } catch (error) {
-      handleError(error)
-    }
-  })
+jsonOption(
+  program
+    .command("rename-file")
+    .description("Rename a file")
+    .argument("<file>", "File path or id to rename")
+    .argument("<toname>", "New file name")
+    .action(async (file: string, toname: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.renameFile(
+          await resolveFileId(api, file),
+          toname,
+        )
+        assertSuccess(response.result, response.error)
+        emit(options, response.metadata, () => ok("Done"))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
-program
-  .command("delete-file")
-  .description("Permanently delete a file")
-  .argument("<file>", "File path or id to delete")
-  .action(async (file: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.deleteFile(await resolveFileId(api, file))
-      assertSuccess(response.result, response.error)
-      ok("Done")
-    } catch (error) {
-      handleError(error)
-    }
-  })
+jsonOption(
+  program
+    .command("delete-file")
+    .description("Permanently delete a file")
+    .argument("<file>", "File path or id to delete")
+    .action(async (file: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.deleteFile(await resolveFileId(api, file))
+        assertSuccess(response.result, response.error)
+        emit(options, response.metadata, () => ok("Done"))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
 // The bare default stays bare — `value()` exists so a link pipes without jq,
 // and wrapping one string in an object would make the common case worse. The
@@ -676,24 +717,26 @@ jsonOption(
     }),
 )
 
-program
-  .command("revert-revision")
-  .description("Revert a file to a previous revision")
-  .argument("<file>", "File path or id")
-  .argument("<revisionid>", "Revision ID to revert to")
-  .action(async (file: string, revisionid: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.revertRevision(
-        await resolveFileId(api, file),
-        parseInt(revisionid, 10),
-      )
-      assertSuccess(response.result, response.error)
-      ok("Done")
-    } catch (error) {
-      handleError(error)
-    }
-  })
+jsonOption(
+  program
+    .command("revert-revision")
+    .description("Revert a file to a previous revision")
+    .argument("<file>", "File path or id")
+    .argument("<revisionid>", "Revision ID to revert to")
+    .action(async (file: string, revisionid: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.revertRevision(
+          await resolveFileId(api, file),
+          parseInt(revisionid, 10),
+        )
+        assertSuccess(response.result, response.error)
+        emit(options, response.metadata, () => ok("Done"))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
 program
   .command("list-shares")
@@ -763,76 +806,95 @@ program
     }
   })
 
-program
-  .command("share-folder")
-  .description(
-    "Share a folder with another pCloud user (permissions: 1=Create, 2=Modify, 4=Delete)",
-  )
-  .argument("<folder>", "Folder path or id to share")
-  .argument("<email>", "Recipient email address")
-  .argument(
-    "<permissions>",
-    "Permission bitmask (1=Create, 2=Modify, 4=Delete)",
-  )
-  .action(async (folder: string, email: string, permissions: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.shareFolder(
-        await resolveFolderId(api, folder),
-        email,
-        parseInt(permissions, 10),
-      )
-      assertSuccess(response.result, response.error)
-      ok("Done")
-    } catch (error) {
-      handleError(error)
-    }
-  })
+jsonOption(
+  program
+    .command("share-folder")
+    .description(
+      "Share a folder with another pCloud user (permissions: 1=Create, 2=Modify, 4=Delete)",
+    )
+    .argument("<folder>", "Folder path or id to share")
+    .argument("<email>", "Recipient email address")
+    .argument(
+      "<permissions>",
+      "Permission bitmask (1=Create, 2=Modify, 4=Delete)",
+    )
+    .action(
+      async (folder: string, email: string, permissions: string, options) => {
+        try {
+          const api = await getAuthenticatedAPI()
+          const folderid = await resolveFolderId(api, folder)
+          const permissionMask = parseInt(permissions, 10)
+          const response = await api.shareFolder(
+            folderid,
+            email,
+            permissionMask,
+          )
+          assertSuccess(response.result, response.error)
+          emit(options, { folderid, email, permissions: permissionMask }, () =>
+            ok("Done"),
+          )
+        } catch (error) {
+          handleError(error)
+        }
+      },
+    ),
+)
 
-program
-  .command("accept-share")
-  .description("Accept an incoming share request")
-  .argument("<sharerequestid>", "Share request ID")
-  .action(async (sharerequestid: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.acceptShare(parseInt(sharerequestid, 10))
-      assertSuccess(response.result, response.error)
-      ok("Done")
-    } catch (error) {
-      handleError(error)
-    }
-  })
+jsonOption(
+  program
+    .command("accept-share")
+    .description("Accept an incoming share request")
+    .argument("<sharerequestid>", "Share request ID")
+    .action(async (sharerequestid: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const id = parseInt(sharerequestid, 10)
+        const response = await api.acceptShare(id)
+        assertSuccess(response.result, response.error)
+        emit(options, { sharerequestid: id }, () => ok("Done"))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
-program
-  .command("decline-share")
-  .description("Decline an incoming share request")
-  .argument("<sharerequestid>", "Share request ID")
-  .action(async (sharerequestid: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.declineShare(parseInt(sharerequestid, 10))
-      assertSuccess(response.result, response.error)
-      ok("Done")
-    } catch (error) {
-      handleError(error)
-    }
-  })
+jsonOption(
+  program
+    .command("decline-share")
+    .description("Decline an incoming share request")
+    .argument("<sharerequestid>", "Share request ID")
+    .action(async (sharerequestid: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const id = parseInt(sharerequestid, 10)
+        const response = await api.declineShare(id)
+        assertSuccess(response.result, response.error)
+        emit(options, { sharerequestid: id }, () => ok("Done"))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
-program
-  .command("remove-share")
-  .description("Remove an active share (see Share ID in `pcloud list-shares`)")
-  .argument("<shareid>", "Share ID of the accepted share")
-  .action(async (shareid: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.removeShare(parseInt(shareid, 10))
-      assertSuccess(response.result, response.error)
-      ok("Done")
-    } catch (error) {
-      handleError(error)
-    }
-  })
+jsonOption(
+  program
+    .command("remove-share")
+    .description(
+      "Remove an active share (see Share ID in `pcloud list-shares`)",
+    )
+    .argument("<shareid>", "Share ID of the accepted share")
+    .action(async (shareid: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const id = parseInt(shareid, 10)
+        const response = await api.removeShare(id)
+        assertSuccess(response.result, response.error)
+        emit(options, { shareid: id }, () => ok("Done"))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
 program
   .command("publink-file")
@@ -903,20 +965,22 @@ jsonOption(
     }),
 )
 
-program
-  .command("delete-publink")
-  .description("Delete a public link by its code")
-  .argument("<code>", "Public link code")
-  .action(async (code: string) => {
-    try {
-      const api = await getAuthenticatedAPI()
-      const response = await api.deletePublink(code)
-      assertSuccess(response.result, response.error)
-      ok("Done")
-    } catch (error) {
-      handleError(error)
-    }
-  })
+jsonOption(
+  program
+    .command("delete-publink")
+    .description("Delete a public link by its code")
+    .argument("<code>", "Public link code")
+    .action(async (code: string, options) => {
+      try {
+        const api = await getAuthenticatedAPI()
+        const response = await api.deletePublink(code)
+        assertSuccess(response.result, response.error)
+        emit(options, { code }, () => ok("Done"))
+      } catch (error) {
+        handleError(error)
+      }
+    }),
+)
 
 program
   .command("zip")
@@ -1002,6 +1066,7 @@ program
     "--to <path>",
     "Restore into this folder instead of the original location",
   )
+  .option("--json", "Output raw JSON")
   .action(async (id: string, options) => {
     try {
       const api = await getAuthenticatedAPI()
@@ -1045,8 +1110,10 @@ program
       assertSuccess(response.result, response.error)
 
       const where = (response.metadata as { path?: string } | undefined)?.path
-      console.log(
-        `✓ Restored ${options.folder ? "folder" : "file"} ${id}${where ? ` to ${where}` : ""}.`,
+      emit(options, response.metadata, () =>
+        console.log(
+          `✓ Restored ${options.folder ? "folder" : "file"} ${id}${where ? ` to ${where}` : ""}.`,
+        ),
       )
     } catch (error) {
       handleError(error)
@@ -1070,18 +1137,26 @@ const rewindUnavailable = (): never => {
   process.exit(1)
 }
 
-program
-  .command("list-rewind")
-  .description("Unavailable — Rewind has no public API (see `pcloud changes`)")
-  .argument("[path]", "Path to check (e.g., /myfile.txt)")
-  .action(rewindUnavailable)
+jsonOption(
+  program
+    .command("list-rewind")
+    .description(
+      "Unavailable — Rewind has no public API (see `pcloud changes`)",
+    )
+    .argument("[path]", "Path to check (e.g., /myfile.txt)")
+    .action(rewindUnavailable),
+)
 
-program
-  .command("restore-rewind")
-  .description("Unavailable — Rewind has no public API (see `pcloud changes`)")
-  .argument("[fileid]", "File ID to restore")
-  .argument("[topath]", "Destination path (e.g., /restored-file.txt)")
-  .action(rewindUnavailable)
+jsonOption(
+  program
+    .command("restore-rewind")
+    .description(
+      "Unavailable — Rewind has no public API (see `pcloud changes`)",
+    )
+    .argument("[fileid]", "File ID to restore")
+    .argument("[topath]", "Destination path (e.g., /restored-file.txt)")
+    .action(rewindUnavailable),
+)
 
 program
   .command("changes")
@@ -1807,7 +1882,8 @@ program
       assertSuccess(stat.result, stat.error)
 
       const meta = stat.metadata as
-        { fileid?: number; name?: string; isfolder?: boolean } | undefined
+        | { fileid?: number; name?: string; isfolder?: boolean }
+        | undefined
       if (!meta?.fileid || meta.isfolder) {
         console.error(`Error: not a file: ${path}`)
         process.exit(1)
@@ -2054,12 +2130,29 @@ program
 // management has to reach into. Owning that here — beside `pcloud sync`, which
 // already reads the same file — keeps the format in one place rather than
 // reimplemented in whatever shell script needs it.
+// Raw values under --json, keyed by the daemon's own names: the humanised
+// labels and units are presentation, and a script comparing against a desired
+// state wants exactly what is stored. An absent key is null rather than omitted,
+// so the object always carries the same keys.
 const settings = program
   .command("settings")
   .description("Show pCloud Drive's local client settings")
-  .action(() => {
+  .option("--json", "Output raw JSON")
+  .action((options) => {
     try {
       const values = readSettings()
+      if (options.json) {
+        console.log(
+          JSON.stringify(
+            Object.fromEntries(
+              READABLE_SETTINGS.map((key) => [key, values[key] ?? null]),
+            ),
+            null,
+            2,
+          ),
+        )
+        return
+      }
       // A raw dump reads as noise: "minlocalfreespace 2147000000" and
       // "enableddrive 1" are the same shape on screen and nothing alike in
       // meaning. Each key gets the rendering its unit deserves.
@@ -2101,9 +2194,13 @@ const settings = program
 const ignoreKey = (paths: boolean): "ignorepaths" | "ignorepatterns" =>
   paths ? "ignorepaths" : "ignorepatterns"
 
-const showIgnore = (paths: boolean): void => {
+const showIgnore = (paths: boolean, json = false): void => {
   const key = ignoreKey(paths)
   const entries = parseList(readSettings()[key])
+  if (json) {
+    console.log(JSON.stringify({ key, entries }, null, 2))
+    return
+  }
   if (entries.length === 0) {
     console.log(`No ${key} configured`)
     return
@@ -2172,9 +2269,10 @@ const ignore = settings
   .command("ignore")
   .description("Show the names and paths pCloud Drive refuses to sync")
   .option("--paths", "Operate on ignorepaths rather than ignorepatterns")
+  .option("--json", "Output raw JSON")
   .action((options) => {
     try {
-      showIgnore(options.paths === true)
+      showIgnore(options.paths === true, options.json === true)
     } catch (error) {
       handleError(error)
     }
@@ -2249,6 +2347,20 @@ ignoreWriteOptions(
   }
 })
 
+// True only when this file is the process entry point — `pcloud`, `node
+// dist/cli.js` or `tsx src/cli.ts` — and false when a test imports it to walk
+// the command tree. realpath because the installed binary is a symlink into
+// node_modules, and argv[1] carries the link rather than its target.
+const isEntryPoint = (): boolean => {
+  const entry = process.argv[1]
+  if (!entry) return false
+  try {
+    return realpathSync(entry) === fileURLToPath(import.meta.url)
+  } catch {
+    return false
+  }
+}
+
 // Bare `pcloud` opens the browser, the way k9s, lazygit and btop do: once a
 // tool has a full interface, that interface is the tool and needs no verb.
 // `--help` and every subcommand are untouched, so nothing scripted changes —
@@ -2283,7 +2395,9 @@ const invokedBare =
       process.argv[i - 1] !== "--screen",
   ).length <= 2
 
-if (invokedBare) {
+if (!isEntryPoint()) {
+  // Imported, not run: define the commands and stop.
+} else if (invokedBare) {
   // No credential needed in mock mode — that is most of the point.
   if (!mock) requireStoredAuth()
   const { startBrowse } = await import("./browse.js")

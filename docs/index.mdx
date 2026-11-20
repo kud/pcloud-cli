@@ -22,8 +22,9 @@ lets you bypass stored credentials entirely for CI and scripted contexts.
   bogus permissions error.
 - **Sync folder scaffolding** — `sync add` makes the folder on both sides and
   tells you the two paths to pair, so only the pairing itself stays in the app.
-- **Machine-readable everywhere** — every data-returning command renders for
-  humans by default and emits the raw payload under `--json`.
+- **Machine-readable everywhere** — every command renders for humans by
+  default and emits JSON under `--json`, mutations included — see JSON output
+  below.
 - **Two ways to log in** — email and password by default (no setup, full API
   access), or browser-based OAuth 2.0 if you would rather the CLI never handled
   your password. Tokens are stored at `~/.config/pcloud/tokens.json` (mode
@@ -61,6 +62,46 @@ and when to choose each, [Trash & restore](/projects/pcloud-cli/docs/trash) and
 [Client settings](/projects/pcloud-cli/docs/settings) for the desktop app's own
 database, and [doctor](/projects/pcloud-cli/docs/doctor) when something is wrong
 and you want to be told what.
+
+## 🧾 JSON output
+
+`--json` is a contract rather than a per-command feature: a script may pass it
+to any non-interactive command without first checking whether that command
+supports it. A test walks the whole command tree, so a new command cannot ship
+without the flag.
+
+- **Where it goes.** The flag follows the command it applies to —
+  `pcloud ls /Docs --json`, not `pcloud --json ls`.
+- **Listings and lookups** emit pCloud's own payload for what was asked:
+  `ls` the folder's contents, `stat` the item's metadata, `list-trash` the
+  deleted items, and so on.
+- **Mutations** emit the metadata of the item they produced or affected —
+  `mkdir` the folder, `copy-file`, `move-file`, `rename-file`, `delete-file`
+  and `revert-revision` the file, `restore-trash` the restored item. Where
+  pCloud returns no item, the output names what was acted on instead:
+
+  | Command          | Output                                                     |
+  | ---------------- | ---------------------------------------------------------- |
+  | `rmdir`          | `{ "folderid", "deletedfiles", "deletedfolders" }`         |
+  | `share-folder`   | `{ "folderid", "email", "permissions" }`                   |
+  | `accept-share`   | `{ "sharerequestid" }`                                     |
+  | `decline-share`  | `{ "sharerequestid" }`                                     |
+  | `remove-share`   | `{ "shareid" }`                                            |
+  | `delete-publink` | `{ "code" }`                                               |
+  | `logout`         | `{ "revoked": true \| false \| null, "removed": boolean }` |
+
+  `revoked` is `null` when there was no session token to revoke.
+
+- **Single values stay bare by default.** `get-link`, `zip` and the publink
+  commands print a URL so it pipes without `jq`; under `--json` it becomes
+  `{ "link" }`.
+- **Errors** are never written to standard output. A failing command prints to
+  standard error and exits non-zero, with or without `--json`.
+
+`browse` and `login` are interactive and take no `--json`. The dry-run commands
+that write to pCloud Drive's local database (`sync prune`, `sync clear-tasks`,
+`sync add`, `settings ignore add/remove/set`), along with `rewind` and
+`doctor`, do not have it yet.
 
 ## ⚙️ Configuration
 
