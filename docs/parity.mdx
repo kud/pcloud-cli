@@ -1,0 +1,145 @@
+---
+title: 🧭 GUI parity
+description: What pCloud's desktop client and web app can do, and which of it pcloud-cli covers, lacks, or leaves out on purpose.
+---
+
+pCloud ships two graphical clients: **pCloud Drive**, the desktop app that
+mounts the virtual drive and runs sync, and the **web app**. This page lists
+what they expose and, for each, where `pcloud` stands. It exists so that gaps
+are chosen rather than discovered, and so that the roadmap follows from the
+table instead of from whatever comes to mind next.
+
+## Reading the table
+
+| Status        | Meaning                                                                   |
+| ------------- | ------------------------------------------------------------------------- |
+| ✅ covered    | A command does it; the command is named                                   |
+| 🟡 partial    | Some of it is reachable, but not the whole of what the GUI offers         |
+| ❌ missing    | The GUI does it and `pcloud` does not, yet                                |
+| 🚫 excluded   | Left out on purpose — the reason is given, so it is not reopened as a gap |
+
+The **Evidence** column says how the GUI side is known, because not all of it is
+known equally well:
+
+| Evidence  | Meaning                                                                                       |
+| --------- | --------------------------------------------------------------------------------------------- |
+| API       | `pcloud` already calls the pCloud API method behind it, so the capability demonstrably exists |
+| local db  | pCloud Drive's own database (`~/.pcloud/data.db`) holds the table or setting behind it        |
+| observed  | Described from pCloud's behaviour elsewhere in these docs                                     |
+| unverified | Commonly listed as a client feature, but not yet checked against pCloud's own documentation  |
+
+An **unverified** row records a feature worth checking, not a confirmed one. It
+moves to another evidence class once confirmed, or off the table if pCloud does
+not offer it.
+
+## Files
+
+| Feature                                | Client       | Evidence   | Status     | Command / note                                                              |
+| -------------------------------------- | ------------ | ---------- | ---------- | --------------------------------------------------------------------------- |
+| Browse folders                         | web, desktop | API        | ✅ covered | `pcloud ls`, `pcloud` (the [browser](/projects/pcloud-cli/docs/browse))     |
+| File and folder details                | web          | API        | ✅ covered | `pcloud stat`                                                               |
+| Create a folder                        | web, desktop | API        | ✅ covered | `pcloud mkdir`                                                              |
+| Delete a folder                        | web, desktop | API        | ✅ covered | `pcloud rmdir`                                                              |
+| Copy, move, rename, delete a file      | web, desktop | API        | ✅ covered | `pcloud copy-file`, `move-file`, `rename-file`, `delete-file`               |
+| Copy, move, rename a folder            | web, desktop | unverified | ❌ missing | The file commands take files only                                           |
+| Upload                                 | web, desktop | API        | ✅ covered | `pcloud upload`; `u` in the browser                                         |
+| Download a file                        | web          | API        | ✅ covered | `pcloud download`, `pcloud get-link`                                        |
+| Download several items as a ZIP        | web          | API        | ✅ covered | `pcloud zip`                                                                |
+| Checksums                              | —            | API        | ✅ covered | `pcloud checksum` — the CLI offers more than the GUI here                   |
+| Search across the drive                | web          | unverified | ❌ missing |                                                                             |
+| Image and Markdown preview             | web          | observed   | ✅ covered | Inline previews in the browser's Files tab                                  |
+| Audio and video playback, playlists    | web          | unverified | 🚫 excluded | Playback belongs to a media player, not a terminal                         |
+
+## Recovery
+
+| Feature                              | Client | Evidence   | Status     | Command / note                                                                                                       |
+| ------------------------------------ | ------ | ---------- | ---------- | -------------------------------------------------------------------------------------------------------------------- |
+| Trash: list and restore              | web    | API        | ✅ covered | `pcloud list-trash`, `restore-trash` ([Trash](/projects/pcloud-cli/docs/trash)) — session token only                 |
+| Trash: empty, or purge one item      | web    | unverified | ❌ missing |                                                                                                                      |
+| File versions: list and revert       | web    | API        | ✅ covered | `pcloud list-revisions`, `revert-revision`                                                                           |
+| File versions: download an old one without reverting | web | unverified | ❌ missing | Reverting is the only way to reach an earlier version today                                  |
+| Rewind the account to a moment       | web    | observed   | ✅ covered | `pcloud rewind`, reconstructed from changes, trash and revisions — pCloud exposes no Rewind API ([Rewind](/projects/pcloud-cli/docs/rewind)) |
+| Change history                       | web    | API        | ✅ covered | `pcloud changes`; the browser's Rewind tab                                                                           |
+
+## Sharing
+
+| Feature                                        | Client | Evidence   | Status     | Command / note                                                    |
+| ---------------------------------------------- | ------ | ---------- | ---------- | ----------------------------------------------------------------- |
+| Share a folder with another user               | web    | API        | ✅ covered | `pcloud share-folder` ([Shares](/projects/pcloud-cli/docs/shares)) |
+| Accept or decline an incoming share            | web    | API        | ✅ covered | `pcloud accept-share`, `decline-share`                            |
+| List and remove shares                         | web    | API        | ✅ covered | `pcloud list-shares`, `remove-share`                              |
+| Change an existing share's permissions         | web    | unverified | ❌ missing | Today: remove and share again                                     |
+| Public link to a file or folder                | web    | API        | ✅ covered | `pcloud publink-file`, `publink-folder`                           |
+| Expiry and download limit at creation          | web    | API        | 🟡 partial | `--expire` on both; `--max-downloads` on files only               |
+| List and delete public links                   | web    | API        | ✅ covered | `pcloud list-publinks`, `delete-publink`                          |
+| Edit a link's expiry or limit after creation   | web    | unverified | ❌ missing |                                                                   |
+| Download counts and traffic per link           | web    | unverified | ❌ missing | Whether `list-publinks --json` already carries them is unchecked  |
+| Password-protected links                       | web    | unverified | ❌ missing |                                                                   |
+| Upload links (others upload into your folder)  | web    | unverified | ❌ missing |                                                                   |
+
+## Account
+
+| Feature                                   | Client       | Evidence   | Status      | Command / note                                                                        |
+| ----------------------------------------- | ------------ | ---------- | ----------- | ------------------------------------------------------------------------------------- |
+| Log in and out                            | web, desktop | API        | ✅ covered  | `pcloud login`, `logout` ([Authentication](/projects/pcloud-cli/docs/authentication)) |
+| Account details                           | web, desktop | API        | 🟡 partial  | `pcloud whoami` — the raw account payload is under `--json`                           |
+| Quota, usage, plan, region at a glance    | web, desktop | unverified | ❌ missing  | A dedicated usage view; region is chosen by `PCLOUD_REGION` rather than read back     |
+| Largest folders, file counts              | —            | —          | ❌ missing  | Not a GUI feature, listed here because it would sit beside usage                      |
+| Two-factor, active sessions, devices      | web          | unverified | 🚫 excluded | Security settings stay in the client that shows them in full                          |
+| Plan changes and payment                  | web          | unverified | 🚫 excluded | Billing is not a terminal task                                                        |
+
+## Desktop client and sync
+
+These read the desktop client's own database rather than the API, so they only
+apply on a machine where pCloud Drive is installed.
+
+| Feature                                   | Client  | Evidence   | Status      | Command / note                                                                                         |
+| ----------------------------------------- | ------- | ---------- | ----------- | ------------------------------------------------------------------------------------------------------ |
+| See sync pairs and their health           | desktop | local db   | ✅ covered  | `pcloud sync` ([Local sync inspection](/projects/pcloud-cli/docs/sync)) — reports faults the app does not |
+| Remove a sync pair                        | desktop | local db   | 🟡 partial  | `pcloud sync prune`, for orphaned pairs only                                                           |
+| Prepare a sync pair                       | desktop | local db   | 🟡 partial  | `pcloud sync add` makes both folders; the pairing itself stays in the app                              |
+| Create the sync pair itself               | desktop | local db   | 🚫 excluded | See below                                                                                              |
+| Clear stuck queued operations             | desktop | local db   | ✅ covered  | `pcloud sync clear-tasks`                                                                              |
+| What is uploading or downloading now      | desktop | local db   | ❌ missing  | `pcloud sync` shows a per-pair queue count only; a `transfers` view is planned                         |
+| Ignored names and paths                   | desktop | local db   | ✅ covered  | `pcloud settings ignore` ([Client settings](/projects/pcloud-cli/docs/settings))                       |
+| Language, minimum free space, start at login, drive mounted | desktop | local db | 🟡 partial | `pcloud settings` reads them; only the ignore lists are writable                     |
+| Bandwidth limits, cache size              | desktop | unverified | ❌ missing  | Not yet located in the database                                                                        |
+| Folder backup (one-way upload)            | desktop | unverified | ❌ missing  | Unclear whether the database distinguishes it from a sync pair                                         |
+| Offline or selective files on the drive   | desktop | unverified | ❌ missing  |                                                                                                        |
+| Crypto: is it unlocked and mounted        | desktop | unverified | ❌ missing  | A read-only `crypto status` is planned                                                                 |
+| Crypto: unlock                            | desktop | observed   | 🚫 excluded | See below                                                                                              |
+| Diagnose what is wrong                    | —       | —          | ✅ covered  | `pcloud doctor` — the CLI offers more than the GUI here                                                |
+
+## Deliberately excluded
+
+These are not gaps. They are recorded here so that nobody reopens them without
+new evidence.
+
+### Creating sync pairs
+
+The daemon accepts a hand-written `syncfolder` row — and then silently never
+uploads. It watches the folder and indexes new files, but never builds the
+remote index a working pair carries, so files sit known and unsent while every
+health check reports the pair as fine. [Local sync
+inspection](/projects/pcloud-cli/docs/sync) gives the full account. `sync add`
+does the unambiguous halves and leaves the pairing to the app.
+
+### Unlocking Crypto
+
+pCloud Crypto is zero-knowledge by design: the passphrase never leaves the
+machine, and the unlocked state lives in the daemon's memory rather than on
+disk. There is no row to write and no API to call. The CLI may report whether
+Crypto is unlocked; it will not unlock it. Crypto key tables are never read, by
+the same allowlist that keeps `sync --debug` away from credentials.
+
+### Media playback, billing, security settings
+
+Each has a better home than a terminal, and none blocks a workflow the CLI
+exists to serve.
+
+## The boundary that shapes the rest
+
+Features backed by the desktop client's **local database stay read-only** unless
+a write has been shown to be safe. `sync` and `settings` set that boundary, and
+the sync-pair experiment above shows the cost of crossing it: a write the daemon
+accepts is not the same as a write the daemon acts on.
