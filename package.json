@@ -3,13 +3,13 @@
   "version": "1.2.5",
   "description": "CLI tool for pCloud file operations — list, restore from trash and rewind",
   "homepage": "https://kud.io/projects/pcloud-cli",
-  "main": "dist/cli.js",
+  "main": "dist/bin.js",
   "bin": {
-    "pcloud": "./dist/cli.js"
+    "pcloud": "./dist/bin.js"
   },
   "scripts": {
     "build": "npm run clean && tsc",
-    "start": "node dist/cli.js",
+    "start": "node dist/bin.js",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
